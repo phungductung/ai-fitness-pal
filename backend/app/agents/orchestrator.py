@@ -325,8 +325,9 @@ class FitnessAgents:
             return {"messages": [AIMessage(content="I'm not sure how to help with that specifically.")]}
 
         if len(outputs) == 1:
-            # Only one agent responded, just return it
-            return {"messages": [AIMessage(content=outputs[0]["content"], name=outputs[0]["sender"])]}
+            # Only one agent responded, return it as assistant
+            return {"messages": [AIMessage(content=outputs[0]["content"], name="assistant")]}
+
 
         # Multiple agents, blend them
         blend_prompt = f"""
@@ -335,15 +336,21 @@ class FitnessAgents:
         Specialist Advice:
         {json.dumps(outputs, indent=2)}
         
-        Rules:
-        1. Do NOT say 'Coach says X and Nutritionist says Y'. 
-        2. Create a unified narrative that flows logically (e.g., training advice followed by how nutrition supports it).
-        3. Use Markdown formatting.
-        4. Address the user directly.
+        Strict Rules:
+        1. Do NOT use greetings (e.g., 'Hello', 'Hi', 'Dear').
+        2. Do NOT use sign-offs or signatures (e.g., 'Best regards', 'Your Fitness Assistant').
+        3. Do NOT say 'Coach says X and Nutritionist says Y'. 
+        4. Go STRAIGHT to the advice and information.
+        5. Create a unified narrative that flows logically.
+        6. Use clean Markdown formatting.
+        7. Maintain a natural, expert, and direct conversational tone.
         """
         
         response = await self.llm.ainvoke(blend_prompt)
+        # Force the name to 'assistant' for consistent UI display
+        response.name = "assistant"
         return {"messages": [response], "intermediate_outputs": []} # Clear intermediate for next turn
+
 
 
 # --- Building the Graph ---

@@ -119,8 +119,10 @@ async def chat_endpoint(request: ChatRequest):
                             content = last_msg.get("content", "")
                         
                         if isinstance(content, str) and content.strip():
+                            # Map 'aggregator' to 'assistant' for the final message too
+                            sender_name = "assistant" if node_name == "aggregator" else node_name
                             data = json.dumps({
-                                "sender": node_name,
+                                "sender": sender_name,
                                 "content": content,
                                 "type": "text"
                             })

@@ -101,12 +101,4 @@ The application will be available at [http://localhost:3000](http://localhost:30
 -   **Search**: Tavily Search API.
 -   **Storage**: Local CSV, SQLite, and ChromaDB (for vector RAG).
 
----
 
-## 📜 License
-
-Distributed under the MIT License. See `LICENSE` for more information.
-
----
-
-Built with ❤️ for a healthier, AI-driven future.

@@ -63,8 +63,10 @@ async def chat_endpoint(request: ChatRequest):
         # Pass file path into the state if provided
         inputs = {
             "messages": history_messages,
-            "data_context": {"file_path": request.file_path} if request.file_path else {}
+            "data_context": {"file_path": request.file_path} if request.file_path else {},
+            "intermediate_outputs": []
         }
+
         
         # Track the active node to associate tokens with a sender
         current_node = "assistant"
@@ -79,17 +81,23 @@ async def chat_endpoint(request: ChatRequest):
                 
                 # Only set current_node when entering a user-facing agent node
                 # This acts as a 'gatekeeper' for the UI
-                user_facing_nodes = ["coach", "nutrition"]
+                # Only set current_node for the aggregator to ensure a single blended response
+                user_facing_nodes = ["aggregator"]
                 if kind == "on_chain_start" and node_name in user_facing_nodes:
-                    current_node = node_name
+                    current_node = "assistant" # Group all blended output under 'assistant'
                     print(f"Entering agent node: {node_name}")
+
+
                 elif kind == "on_chain_start" and node_name and not node_name.startswith("__"):
                     # For all other nodes (orchestrator, tools, etc.), set current_node to None
                     # to prevent any tokens from leaking to the UI
                     current_node = None
 
                 # Only stream tokens if we are currently inside a user-facing node
-                if kind == "on_chat_model_stream" and current_node in ["assistant", "coach", "nutrition"]:
+                # Only stream tokens from the aggregator
+                if kind == "on_chat_model_stream" and current_node == "assistant":
+
+
                     content = event["data"]["chunk"].content
                     if content:
                         data = json.dumps({

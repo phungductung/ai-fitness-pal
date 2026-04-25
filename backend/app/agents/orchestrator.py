@@ -24,6 +24,8 @@ class AgentState(TypedDict):
     planned_agents: List[str] # List of agents to be called in sequence
     data_context: dict  # Stores data retrieved from MCP or RAG
     summary: str  # Condensed history to manage token limits
+    intermediate_outputs: List[dict] # Stores raw responses from agents for blending
+
 
 
 # --- Tools ---
@@ -262,8 +264,19 @@ class FitnessAgents:
             input_messages.append(HumanMessage(content=multimodal_content))
             
         response = await self.llm_with_tools.ainvoke(input_messages)
-        remaining = planned[1:] if planned else []
-        return {"messages": [response], "active_agent": "coach", "planned_agents": remaining}
+        
+        # If calling a tool, keep the agent active and don't remove from plan
+        if response.tool_calls:
+            return {"messages": [response], "active_agent": "coach", "planned_agents": planned}
+            
+        # If it's a final text response, store it for blending and move to next
+        remaining = planned[1:] if planned and planned[0] == "coach" else planned
+        new_output = {"sender": "coach", "content": response.content}
+        return {
+            "intermediate_outputs": state.get("intermediate_outputs", []) + [new_output],
+            "active_agent": "coach", 
+            "planned_agents": remaining
+        }
 
     async def nutrition_agent(self, state: AgentState):
         """Focuses on macros, calories, and supplements."""
@@ -291,8 +304,46 @@ class FitnessAgents:
             input_messages.append(HumanMessage(content=multimodal_content))
             
         response = await self.llm_with_tools.ainvoke(input_messages)
-        remaining = planned[1:] if planned else []
-        return {"messages": [response], "active_agent": "nutrition", "planned_agents": remaining}
+        
+        # If calling a tool, keep active
+        if response.tool_calls:
+            return {"messages": [response], "active_agent": "nutrition", "planned_agents": planned}
+            
+        # Final text response
+        remaining = planned[1:] if planned and planned[0] == "nutrition" else planned
+        new_output = {"sender": "nutrition", "content": response.content}
+        return {
+            "intermediate_outputs": state.get("intermediate_outputs", []) + [new_output],
+            "active_agent": "nutrition", 
+            "planned_agents": remaining
+        }
+
+    async def aggregator(self, state: AgentState):
+        """Blends outputs from multiple agents into a single cohesive response."""
+        outputs = state.get("intermediate_outputs", [])
+        if not outputs:
+            return {"messages": [AIMessage(content="I'm not sure how to help with that specifically.")]}
+
+        if len(outputs) == 1:
+            # Only one agent responded, just return it
+            return {"messages": [AIMessage(content=outputs[0]["content"], name=outputs[0]["sender"])]}
+
+        # Multiple agents, blend them
+        blend_prompt = f"""
+        You are the Head AI Fitness Assistant. You need to blend advice from your specialists into a single, cohesive, and premium response.
+        
+        Specialist Advice:
+        {json.dumps(outputs, indent=2)}
+        
+        Rules:
+        1. Do NOT say 'Coach says X and Nutritionist says Y'. 
+        2. Create a unified narrative that flows logically (e.g., training advice followed by how nutrition supports it).
+        3. Use Markdown formatting.
+        4. Address the user directly.
+        """
+        
+        response = await self.llm.ainvoke(blend_prompt)
+        return {"messages": [response], "intermediate_outputs": []} # Clear intermediate for next turn
 
 
 # --- Building the Graph ---
@@ -320,7 +371,9 @@ def create_fitness_graph():
     workflow.add_node("orchestrator", agents.orchestrator)
     workflow.add_node("coach", agents.coach_agent)
     workflow.add_node("nutrition", agents.nutrition_agent)
+    workflow.add_node("aggregator", agents.aggregator)
     workflow.add_node("tools", tools_node)
+
 
     # Simplified Sequence logic
     workflow.set_entry_point("orchestrator")
@@ -337,13 +390,14 @@ def create_fitness_graph():
     # Routing logic after an agent speaks
     def after_agent(state: AgentState):
         last_message = state["messages"][-1]
-        if last_message.tool_calls:
+        # Only AIMessages have tool_calls attribute
+        if isinstance(last_message, AIMessage) and last_message.tool_calls:
             return "tools"
         
         # If no tool calls, check for next agent in sequence
         planned = state.get("planned_agents", [])
         if not planned:
-            return END
+            return "aggregator"
         return planned[0]
 
     workflow.add_conditional_edges(
@@ -351,9 +405,9 @@ def create_fitness_graph():
         after_agent,
         {
             "tools": "tools",
-            "coach": "coach", # Self-loop only happens if tool results need reprocessing
+            "coach": "coach", 
             "nutrition": "nutrition",
-            END: END
+            "aggregator": "aggregator"
         }
     )
 
@@ -364,9 +418,13 @@ def create_fitness_graph():
             "tools": "tools",
             "coach": "coach",
             "nutrition": "nutrition",
-            END: END
+            "aggregator": "aggregator"
         }
     )
+
+    # After aggregator, we are definitely done
+    workflow.add_edge("aggregator", END)
+
 
     # After tools, go back to the active agent to interpret results
     def after_tools(state: AgentState):

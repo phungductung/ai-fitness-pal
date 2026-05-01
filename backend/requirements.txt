@@ -20,3 +20,4 @@ python-dotenv
 pillow
 sqlalchemy
 langchain-tavily
+supabase

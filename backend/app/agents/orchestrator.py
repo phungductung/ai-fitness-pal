@@ -53,10 +53,8 @@ def visualize_progress(exercise: str):
     """Generates a progress chart for a specific exercise and returns the file path."""
     from app.tools.visualization import generate_progress_chart
 
-    # Using the correct path relative to the backend directory
-    csv_path = "../fitness_mcp/data/prs.csv"
     output_filename = f"static/{exercise.lower().replace(' ', '_')}_progress.png"
-    result = generate_progress_chart(csv_path, exercise, output_path=output_filename)
+    result = generate_progress_chart(exercise, output_path=output_filename)
     
     if "successfully" in result:
         # Return markdown so the Chat UI can render it immediately
@@ -119,13 +117,13 @@ async def get_personal_records():
     return await mcp.get_prs()
 
 @tool
-async def query_fitness_diary(query: str):
-    """Execute a SQL query on the user's local fitness diary database.
-    The table name is 'diary'. Columns are: date (TEXT), entry (TEXT), calories (INTEGER), protein (INTEGER), weight (REAL).
-    Use this to find what the user ate, their calorie intake, weight history, or notes from specific days.
+async def query_fitness_diary(limit: int = 50):
+    """Fetch recent entries from the user's fitness diary database.
+    Returns up to `limit` (default 50) of the most recent entries.
+    Use this to find what the user ate, their calorie intake, weight history, or notes from recent days.
     """
     mcp = get_mcp_client()
-    return await mcp.query_diary(query)
+    return await mcp.query_diary(limit)
 
 
 @tool

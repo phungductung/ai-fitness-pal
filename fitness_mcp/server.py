@@ -1,64 +1,81 @@
 import os
 import sys
-import pandas as pd
-import sqlite3
+import json
 from mcp.server.fastmcp import FastMCP
+from supabase import create_client, Client
 
 # Initialize FastMCP server
 mcp = FastMCP("FitnessDataManager")
 
-# Path to local data
-DB_PATH = os.path.join(os.path.dirname(__file__), "data/diary.sqlite")
-CSV_PATH = os.path.join(os.path.dirname(__file__), "data/prs.csv")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+def get_supabase() -> Client:
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise ValueError("SUPABASE_URL or SUPABASE_KEY is not set.")
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 @mcp.tool()
 def get_personal_records() -> str:
-    """Read the user's personal records (PRs) from the CSV file."""
-    if not os.path.exists(CSV_PATH):
-        return "No PR records found."
-    df = pd.read_csv(CSV_PATH)
-    return df.to_json(orient="records")
+    """Read the user's personal records (PRs) from the database."""
+    try:
+        supabase = get_supabase()
+        response = supabase.table("personal_records").select("*").execute()
+        if not response.data:
+            return "No PR records found."
+        return json.dumps(response.data)
+    except Exception as e:
+        return f"Database error: {str(e)}"
 
 @mcp.tool()
 def add_personal_record(exercise: str, weight: float, reps: int):
-    """Log a new personal record to the CSV file."""
-    import datetime
-    new_entry = {
-        "Date": datetime.date.today().isoformat(),
-        "Exercise": exercise,
-        "Weight": weight,
-        "Reps": reps,
-        "1RM_Estimate": round(weight * (1 + reps/30), 2)
-    }
-    df = pd.read_csv(CSV_PATH) if os.path.exists(CSV_PATH) else pd.DataFrame()
-    df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
-    df.to_csv(CSV_PATH, index=False)
-    return f"Logged PR for {exercise}: {weight}kg x {reps}"
+    """Log a new personal record to the database."""
+    try:
+        supabase = get_supabase()
+        estimate_1rm = round(weight * (1 + reps/30), 2)
+        
+        supabase.table("personal_records").insert({
+            "exercise": exercise,
+            "weight": weight,
+            "reps": reps,
+            "1RM_Estimate": estimate_1rm
+        }).execute()
+        
+        return f"Logged PR for {exercise}: {weight}kg x {reps}"
+    except Exception as e:
+        return f"Database error: {str(e)}"
 
 @mcp.tool()
-def query_fitness_diary(query: str) -> str:
-    """Execute a SQL query on the fitness diary database."""
-    conn = sqlite3.connect(DB_PATH)
+def query_fitness_diary(limit: int = 50) -> str:
+    """Fetch the recent entries from the fitness diary database."""
     try:
-        df = pd.read_sql_query(query, conn)
-        return df.to_json(orient="records")
-    finally:
-        conn.close()
+        supabase = get_supabase()
+        response = supabase.table("diary").select("*").order('date', desc=True).limit(limit).execute()
+        if not response.data:
+            return "No diary records found."
+        return json.dumps(response.data)
+    except Exception as e:
+        return f"Database error: {str(e)}"
 
 @mcp.tool()
 def add_diary_entry(entry: str, calories: int, protein: int, weight: float = None, sleep_hours: float = 8.0, fatigue: int = 3):
     """Add a new daily entry to the fitness diary."""
     import datetime
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     date = datetime.date.today().isoformat()
-    cursor.execute(
-        "INSERT INTO diary (date, entry, calories, protein, weight, sleep_hours, fatigue) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (date, entry, calories, protein, weight, sleep_hours, fatigue)
-    )
-    conn.commit()
-    conn.close()
-    return f"Diary entry added for {date}"
+    try:
+        supabase = get_supabase()
+        supabase.table("diary").insert({
+            "date": date,
+            "entry": entry,
+            "calories": calories,
+            "protein": protein,
+            "weight": weight,
+            "sleep_hours": sleep_hours,
+            "fatigue": fatigue
+        }).execute()
+        return f"Diary entry added for {date}"
+    except Exception as e:
+        return f"Database error: {str(e)}"
 
 if __name__ == "__main__":
     print("Fitness MCP Server is running...", file=sys.stderr)

@@ -20,3 +20,5 @@ python-dotenv
 pillow
 sqlalchemy
 langchain-tavily
+supabase
+postgrest-py

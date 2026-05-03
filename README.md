@@ -4,8 +4,9 @@
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![LangGraph](https://img.shields.io/badge/AI-LangGraph-FF6F00?style=for-the-badge&logo=langchain)](https://github.com/langchain-ai/langgraph)
 [![MCP](https://img.shields.io/badge/Protocol-MCP-4285F4?style=for-the-badge&logo=google)](https://modelcontextprotocol.io/)
+[![Neo4j](https://img.shields.io/badge/Graph-Neo4j-008CC1?style=for-the-badge&logo=neo4j)](https://neo4j.com/)
 
-AI Fitness Pal is a state-of-the-art personal health and fitness ecosystem. It leverages multi-agent orchestration, **Model Context Protocol (MCP)** for secure local data access, and **Hybrid RAG** (Vector + Knowledge Graph) to provide deeply personalized coaching, nutrition analysis, and real-time health insights.
+AI Fitness Pal is a personal health and fitness assistant. It leverages multi-agent orchestration, **Model Context Protocol (MCP)** for secure data access, and **Hybrid RAG** (Vector + Knowledge Graph) to provide personalized coaching, nutrition analysis, and real-time health insights.
 
 ---
 
@@ -28,7 +29,9 @@ flowchart TB
 
     subgraph Backend ["<b>\u2699\ufe0f Backend  &mdash;  FastAPI</b>"]
         direction TB
-        API["\ud83d\udd0c REST + SSE API<br/>/chat &bull; /dashboard-data<br/>/upload &bull; /morning-briefing"]
+        API["\ud83d\udd0c REST + SSE API<br/>/chat &bull; /dashboard-data"]
+        Cache["\ud83c\udfb0 Semantic Cache<br/><i>(SQLite)</i>"]
+        Tracing["\ud83d\udcc8 LangSmith<br/><i>(Observability)</i>"]
     end
 
     subgraph LangGraph ["<b>\ud83e\udde0 AI Core  &mdash;  LangGraph Orchestrator</b>"]
@@ -44,7 +47,7 @@ flowchart TB
             Nutrition["\ud83e\udd57 Nutrition Agent<br/><i>Diet &bull; Macros &bull; Supplements</i>"]
         end
 
-        ToolNode["\ud83d\udee0\ufe0f Tool Executor<br/><i>(LangGraph ToolNode)</i>"]
+        ToolNode["\ud83d\udee0\ufe0f Tool Executor<br/><i>(Human-in-the-loop)</i>"]
         Aggregator["\ud83d\udd00 Aggregator<br/><i>Blends multi-agent output</i>"]
     end
 
@@ -53,19 +56,18 @@ flowchart TB
 
         subgraph MCP ["MCP Server  <i>(Model Context Protocol)</i>"]
             direction LR
-            MCPServer["\ud83d\udd10 MCP Server<br/><i>stdio transport</i>"]
+            MCPServer["\ud83d\udd10 MCP Server<br/><i>Supabase Bridge</i>"]
         end
 
-        subgraph Storage ["Supabase / Local Storage"]
+        subgraph Storage ["Cloud Storage"]
             direction LR
             Supabase[("\ud83d\udc18 Supabase<br/>PostgreSQL")]
-            CSV[("\ud83d\udcc4 CSV<br/>PR Logs")]
         end
 
         subgraph RAG ["Hybrid RAG"]
             direction LR
             VectorRAG["\ud83d\udd0d Vector RAG<br/><i>ChromaDB</i>"]
-            GraphRAG["\ud83c\udf10 Knowledge Graph<br/><i>NetworkX</i>"]
+            GraphRAG["\ud83c\udf10 Knowledge Graph<br/><i>Neo4j AuraDB</i>"]
         end
     end
 
@@ -79,12 +81,12 @@ flowchart TB
     User <-->|"HTTP / SSE"| Frontend
     Chat --> API
     Dashboard --> API
-    Upload --> API
-    Briefing --> API
-
+    
+    API --> Cache
+    API --> Tracing
     API -->|"invoke graph"| SafetyGuard
 
-    SafetyGuard -->|"\u274c Flagged<br/>(medical/emergency)"| User
+    SafetyGuard -->|"\u274c Flagged"| User
     SafetyGuard -->|"\u2705 Safe"| Orchestrator
 
     Orchestrator -->|"plan agents"| Coach
@@ -92,6 +94,8 @@ flowchart TB
 
     Coach -->|"tool calls"| ToolNode
     Nutrition -->|"tool calls"| ToolNode
+    ToolNode -->|"interrupts"| User
+    User -->|"approval"| ToolNode
     ToolNode -->|"results"| Coach
     ToolNode -->|"results"| Nutrition
 
@@ -101,7 +105,6 @@ flowchart TB
 
     ToolNode <-->|"data ops"| MCPServer
     MCPServer <--> Supabase
-    MCPServer <--> CSV
     ToolNode <--> VectorRAG
     ToolNode <--> GraphRAG
     ToolNode <--> Tavily
@@ -119,31 +122,31 @@ flowchart TB
     class Coach,Nutrition agent
     class Orchestrator orch
     class ToolNode,Aggregator tool
-    class MCPServer,Supabase,CSV,VectorRAG,GraphRAG data
+    class MCPServer,Supabase,VectorRAG,GraphRAG data
     class OpenAI,Tavily ext
 ```
 
 ### System Flow
 
-1. **User → Frontend (Next.js 15)**: Premium, responsive interface with streaming chat (SSE), dynamic charts, file uploads, and TTS-powered morning briefings.
-2. **Frontend → FastAPI Backend**: REST endpoints handle chat, dashboard data, file uploads, and audio generation.
-3. **FastAPI → Safety Guard** *(new)*: Every incoming message is first screened by the **Safety/Medical Guard Agent**. It uses a two-tier detection strategy (fast regex scan + LLM confirmation) to intercept medical, emergency, or mental-health queries and return compassionate disclaimers with professional resources.
-4. **Safety Guard → Orchestrator**: Safe messages are routed to the **LangGraph Orchestrator**, which plans which specialist agents (Coach, Nutrition, or both) should respond.
-5. **Orchestrator → Specialist Agents**: The **Coach Agent** handles training, PRs, and recovery. The **Nutrition Agent** handles diet, macros, and supplements. Both can invoke tools.
-6. **Agents ↔ Tool Executor**: Agents call tools for calculations (1RM, TDEE), data access (MCP → Supabase), knowledge retrieval (Hybrid RAG), live research (Tavily), and visualization.
-7. **Aggregator → User**: When multiple agents contribute, the **Aggregator** blends their outputs into a single cohesive response streamed back to the user.
+1.  **User Interaction**: Premium Next.js 15 interface with streaming chat (SSE), dynamic charts, and TTS briefings.
+2.  **Safety First**: The **Safety/Medical Guard** screens all inputs to intercept medical emergencies or unsafe requests, providing compassionate redirects.
+3.  **Agentic Orchestration**: **LangGraph** coordinates specialized **Coach** and **Nutrition** agents. It uses persistent checkpointers to maintain conversation state.
+4.  **Human-in-the-Loop**: Destructive data operations (like deleting logs or significant PR updates) trigger an **interrupt**, requiring explicit user approval before execution.
+5.  **Smart Caching & Tracing**: **Semantic Caching** reduces LLM latency and costs, while **LangSmith** provides production-grade observability.
+6.  **Data Sovereignty (MCP)**: Data access is abstracted through a **Model Context Protocol** server, ensuring secure and standardized communication with the **Supabase** backend.
 
 ---
 
 ## ✨ Key Features
 
--   **🤖 Multi-Agent Orchestration**: Specialized agents collaborate to solve complex queries. The Coach handles training, while the Nutrition agent analyzes diet—all coordinated by a central orchestrator.
--   **🛡️ Safety/Medical Guard**: A pre-routing agent that detects medical emergencies, injury treatment requests, eating disorders, and mental health crises—gracefully declining with professional resources instead of unsafe advice.
--   **🔍 Live Research Integration**: Powered by Tavily, the system performs real-time research on the latest fitness studies and supplement efficacy to ensure advice is science-backed.
--   **🧠 Hybrid RAG Strategy**: Combines **Vector Search** (ChromaDB) for semantic retrieval with a **Knowledge Graph** (NetworkX) for complex relationship mapping (e.g., how specific exercises impact recovery).
--   **🎙️ Interactive Morning Briefing**: A personalized audio summary generated via OpenAI TTS, recapping your previous day's performance and outlining today's goals.
--   **📊 Dynamic Dashboard**: Real-time visualization of weight progress, PRs, and recovery scores fetched directly from Supabase via MCP.
--   **📄 Multimodal Vision**: Upload meal photos for calorie estimation or medical PDFs for summarized health insights.
+-   **🤖 Multi-Agent Orchestration**: Specialized agents collaborate to solve complex queries. Coordinated by a central orchestrator via LangGraph.
+-   **🛡️ Safety/Medical Guard**: Pre-routing agent that detects medical emergencies and mental health crises—gracefully declining with professional resources.
+-   **🔍 Hybrid RAG Strategy**: Combines **Vector Search** (ChromaDB) for semantic retrieval with a **Neo4j Knowledge Graph** for complex relationship mapping (e.g., supplement interactions).
+-   **⚡ Semantic Caching**: Powered by SQLite, caching LLM responses based on semantic similarity to minimize latency and API costs.
+-   **🕵️ Production Observability**: Integrated with **LangSmith** for deep-dive tracing, debugging, and performance monitoring.
+-   **🤝 Human-in-the-Loop**: Safe execution of tools via LangGraph interrupts, ensuring users always have the final say on data-destructive actions.
+-   **📊 Dynamic Dashboard**: Real-time visualization of fitness data fetched directly from Supabase via MCP.
+-   **🎙️ Morning Briefing**: Personalized audio summary generated via OpenAI TTS, recapping performance and outlining goals.
 
 ---
 
@@ -151,52 +154,60 @@ flowchart TB
 
 ### Prerequisites
 
--   **Python**: 3.10 or higher
--   **Node.js**: 18 or higher (LTS recommended)
--   **API Keys**: OpenAI API Key, Tavily API Key (optional for research)
--   **Database**: Supabase project (or local SQLite fallback)
+-   **Python**: 3.10+
+-   **Node.js**: 18+
+-   **Databases**: Supabase (PostgreSQL), Neo4j AuraDB (Graph), ChromaDB (Local Vector).
+-   **API Keys**: OpenAI, Tavily, LangSmith.
 
-### 1. MCP Server Setup
-The MCP server must be running to provide data to the backend.
+### 1. Database & Environment Setup
+Create a `.env` file in the `backend` directory with the following:
+```env
+OPENAI_API_KEY=sk-...
+TAVILY_API_KEY=tvly-...
+SUPABASE_URL=https://...
+SUPABASE_KEY=...
+NEO4J_URI=neo4j+s://...
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=...
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=lsv2_...
+```
+
+### 2. MCP Server Setup
 ```bash
 cd fitness_mcp
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt # If available, or install mcp
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 python server.py
 ```
 
-### 2. Backend Setup
+### 3. Backend Setup
 ```bash
 cd backend
-python -m venv .venv
-source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-# Create a .env file with:
-# OPENAI_API_KEY=your_key_here
-# TAVILY_API_KEY=your_key_here
-# SUPABASE_URL=your_supabase_url
-# SUPABASE_KEY=your_supabase_key
+# (Optional) Seed the Neo4j Graph
+python seed_neo4j.py
+# Run the server
 python main.py
 ```
 
-### 3. Frontend Setup
+### 4. Frontend Setup
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-The application will be available at [http://localhost:3000](http://localhost:3000).
-
 ---
 
 ## 🛠️ Tech Stack
 
--   **Frontend**: Next.js 15, TypeScript, Tailwind CSS, Shadcn/UI, Lucide React, Framer Motion.
--   **Backend**: FastAPI, LangChain, LangGraph, Pydantic, OpenAI GPT-4o.
--   **Data Protocol**: Model Context Protocol (MCP).
--   **Search**: Tavily Search API.
--   **Storage**: Supabase (PostgreSQL), local CSV fallback, ChromaDB (Vector RAG).
+-   **Frontend**: Next.js 15 (App Router), TypeScript, Tailwind CSS, Framer Motion.
+-   **AI Framework**: LangChain, LangGraph, LangSmith.
+-   **Models**: OpenAI GPT-4o, TTS-1.
+-   **Databases**: Supabase (Postgres), Neo4j (Graph), ChromaDB (Vector).
+-   **Protocols**: Model Context Protocol (MCP), SSE (Streaming).
+-   **Validation**: Pydantic v2 (Strict Tool Validation).
 
 

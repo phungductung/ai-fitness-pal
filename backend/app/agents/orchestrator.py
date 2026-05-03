@@ -19,6 +19,18 @@ import json
 import os
 import re
 from app.utils.mcp_client import get_mcp_client
+from app.tools.schemas import (
+    Calculate1RMInput,
+    CalculateTDEEInput,
+    SuggestMacrosInput,
+    VisualizeProgressInput,
+    QueryKnowledgeGraphInput,
+    SearchResearchDatabaseInput,
+    SearchLatestFitnessResearchInput,
+    QueryFitnessDiaryInput,
+    AddPersonalRecordInput,
+    AddDiaryEntryInput,
+)
 
 
 # --- Structured Output Model for Orchestrator Routing ---
@@ -86,26 +98,26 @@ class AgentState(TypedDict):
 
 
 # --- Tools ---
-@tool
+@tool(args_schema=Calculate1RMInput)
 def calculate_1rm(weight: float, reps: int):
     """Calculate 1-Rep Max using the Epley formula. Useful for bench press, squat, etc."""
     from app.tools.fitness_formulas import calculate_1rm as _calc_1rm
     return _calc_1rm(weight, reps)
 
-@tool
+@tool(args_schema=CalculateTDEEInput)
 def calculate_tdee(weight_kg: float, height_cm: float, age: int, gender: str, activity_multiplier: float):
     """Calculate Total Daily Energy Expenditure. Multiplier: 1.2 (sedentary) to 1.9 (extra active)."""
     from app.tools.fitness_formulas import calculate_tdee as _calc_tdee
     return _calc_tdee(weight_kg, height_cm, age, gender, activity_multiplier)
 
-@tool
+@tool(args_schema=SuggestMacrosInput)
 def suggest_macros(tdee: float, goal: str):
     """Suggest protein, fat, and carb macros based on TDEE and goal ('bulk', 'cut', 'maintain')."""
     from app.tools.fitness_formulas import suggest_macros as _suggest_macros
     return _suggest_macros(tdee, goal)
 
 
-@tool
+@tool(args_schema=VisualizeProgressInput)
 def visualize_progress(exercise: str):
     """Generates a progress chart for a specific exercise and returns the file path."""
     from app.tools.visualization import generate_progress_chart
@@ -121,7 +133,7 @@ def visualize_progress(exercise: str):
     return result
 
 
-@tool
+@tool(args_schema=QueryKnowledgeGraphInput)
 def query_knowledge_graph(query: str):
     """Query the internal knowledge graph for relationships between supplements, biological effects, and fitness goals.
     Use this for high-level relationships (e.g., 'What are the biological effects of X?').
@@ -135,7 +147,7 @@ def query_knowledge_graph(query: str):
             return json.dumps(rag.query_supplement(s))
     return "No specific supplement found in the knowledge graph for this query. Try searching the research database."
 
-@tool
+@tool(args_schema=SearchResearchDatabaseInput)
 def search_research_database(query: str):
     """Search the internal vector database for detailed scientific research snippets.
     Use this for specific biological mechanisms or detailed evidence.
@@ -154,7 +166,7 @@ def search_research_database(query: str):
     return json.dumps(rag.search(query))
 
 
-@tool
+@tool(args_schema=SearchLatestFitnessResearchInput)
 def search_latest_fitness_research(query: str):
     """Search the internet for the latest fitness studies, nutritional news, or athletic performance research.
     Use this tool whenever the user asks about recent studies, 'the latest' information, or specific scientific evidence.
@@ -175,7 +187,7 @@ async def get_personal_records():
     mcp = get_mcp_client()
     return await mcp.get_prs()
 
-@tool
+@tool(args_schema=QueryFitnessDiaryInput)
 async def query_fitness_diary(query: str):
     """Execute a SQL query on the user's local fitness diary database.
     The table name is 'diary'. Columns are: date (TEXT), entry (TEXT), calories (INTEGER), protein (INTEGER), weight (REAL).
@@ -185,7 +197,7 @@ async def query_fitness_diary(query: str):
     return await mcp.query_diary(query)
 
 
-@tool
+@tool(args_schema=AddPersonalRecordInput)
 async def add_personal_record(exercise: str, weight: float, reps: int):
     """Log a new personal record (PR) to the user's local fitness logs.
     Use this when the user reports a new best lift or wants to update their history.
@@ -193,7 +205,7 @@ async def add_personal_record(exercise: str, weight: float, reps: int):
     mcp = get_mcp_client()
     return await mcp.add_pr(exercise, weight, reps)
 
-@tool
+@tool(args_schema=AddDiaryEntryInput)
 async def add_diary_entry(entry: str, calories: int, protein: int, weight: float = None):
     """Add a new entry to the user's daily fitness diary.
     Use this when the user reports what they ate, their current weight, or wants to log their nutritional intake.

@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Activity, Dumbbell, Utensils, Zap, Calendar, TrendingUp, Loader2, Play, Square, Volume2 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import LoadingSkeleton from './LoadingSkeleton';
 
 const weightData = [
   { date: 'Mon', weight: 85.5 },
@@ -24,11 +25,15 @@ export default function Dashboard() {
     today_stats: { calories: 0, protein: 0, weight: 0, recovery: 88 }
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     setIsMounted(true);
-    const fetchDashboardData = async () => {
+    const fetchDashboardData = async (background = false) => {
+      if (background) setIsRefreshing(true);
+      else setIsLoading(true);
+      
       try {
         const response = await fetch('http://localhost:8000/dashboard-data');
         const json = await response.json();
@@ -37,13 +42,14 @@ export default function Dashboard() {
         console.error("Failed to fetch dashboard data:", error);
       } finally {
         setIsLoading(false);
+        setIsRefreshing(false);
       }
     };
     fetchDashboardData();
 
     const handleDataUpdate = () => {
       console.log("Data update detected, refreshing dashboard...");
-      fetchDashboardData();
+      fetchDashboardData(true);
     };
 
     window.addEventListener('data-updated', handleDataUpdate);
@@ -93,11 +99,23 @@ export default function Dashboard() {
     }
   };
 
+  if (isLoading) {
+    return <LoadingSkeleton />;
+  }
+
   return (
     <div className="p-6 space-y-6">
       <header className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold gradient-text">AI Fitness Pal</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold gradient-text">AI Fitness Pal</h1>
+            {isRefreshing && (
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-[10px] text-primary animate-pulse">
+                <Loader2 size={10} className="animate-spin" />
+                Updating...
+              </div>
+            )}
+          </div>
           <p className="text-gray-400">Welcome back. Here is your current status.</p>
         </div>
         <div className="flex space-x-4">

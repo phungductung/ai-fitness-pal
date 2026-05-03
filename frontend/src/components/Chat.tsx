@@ -40,6 +40,7 @@ export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
   const [isStreaming, setIsStreaming] = useState(false);
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -96,6 +97,7 @@ export default function Chat() {
     setPendingInterrupt(null);
     setConnectionError(null);
     setStreamMetrics(null);
+    setIsInitializing(true);
     // Request a fresh thread_id from the backend
     try {
       const res = await fetch('http://localhost:8000/chat/new', { method: 'POST' });
@@ -103,6 +105,8 @@ export default function Chat() {
       setThreadId(data.thread_id);
     } catch {
       setThreadId(null);
+    } finally {
+      setIsInitializing(false);
     }
   }, []);
 
@@ -445,7 +449,9 @@ export default function Chat() {
             <Plus size={20} />
           </button>
           <h3 className="font-semibold text-lg">AI Chatbot</h3>
-          {threadId && (
+          {isInitializing ? (
+            <Loader2 size={12} className="animate-spin text-primary ml-1" />
+          ) : threadId && (
             <span className="text-[9px] text-gray-600 font-mono ml-1 hidden sm:inline" title={`Thread: ${threadId}`}>
               🔗 {threadId.slice(0, 8)}…
             </span>

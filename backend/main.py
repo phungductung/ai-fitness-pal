@@ -82,7 +82,7 @@ async def chat_endpoint(request: ChatRequest):
                 # Only set current_node when entering a user-facing agent node
                 # This acts as a 'gatekeeper' for the UI
                 # Only set current_node for the aggregator to ensure a single blended response
-                user_facing_nodes = ["aggregator"]
+                user_facing_nodes = ["aggregator", "safety_guard"]
                 if kind == "on_chain_start" and node_name in user_facing_nodes:
                     current_node = "assistant" # Group all blended output under 'assistant'
                     print(f"Entering agent node: {node_name}")

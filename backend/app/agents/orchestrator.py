@@ -14,7 +14,46 @@ from langchain_tavily import TavilySearch as TavilySearchResults
 from langgraph.prebuilt import ToolNode
 import json
 import os
+import re
 from app.utils.mcp_client import get_mcp_client
+
+
+# --- Safety / Medical Guard Constants ---
+# High-risk keywords that strongly indicate a medical/emergency situation
+MEDICAL_KEYWORDS_HIGH = [
+    r"\bchest pain\b", r"\bheart attack\b", r"\bstroke\b", r"\bsuicid",
+    r"\bself[- ]?harm\b", r"\bwant to die\b", r"\bkill myself\b",
+    r"\boverdos", r"\banorexia\b", r"\bbulimi", r"\bpurging\b",
+    r"\bstarving myself\b", r"\bbleeding\b", r"\bfracture\b",
+    r"\bbroken bone\b", r"\bsevere pain\b", r"\bcan'?t breathe\b",
+    r"\bshortness of breath\b", r"\bblood in\b", r"\bconcussion\b",
+    r"\bseizure\b", r"\bfaint(ed|ing)?\b", r"\bunconscious\b",
+]
+
+# Medium-risk keywords that need LLM confirmation
+MEDICAL_KEYWORDS_MEDIUM = [
+    r"\binjur(y|ed|ies)\b", r"\bdiagnos", r"\bprescription\b",
+    r"\bmedication\b", r"\bdoctor\b", r"\bhospital\b",
+    r"\bsurgery\b", r"\btreat(ment|ing)?\b", r"\bdisorder\b",
+    r"\bswollen\b", r"\btorn\b", r"\bherniat", r"\bdisloc",
+    r"\bmental health\b", r"\bdepression\b", r"\banxiety disorder\b",
+    r"\beating disorder\b", r"\blaxativ", r"\bdosage\b",
+    r"\bside effect\b", r"\bsteroid\b", r"\binjection\b",
+]
+
+SAFETY_DISCLAIMER = """**Important Health & Safety Notice**
+
+I appreciate you trusting me with this, but this question touches on a **medical or mental health topic** that falls outside my scope as a fitness assistant. Providing guidance here could be harmful, so I want to be responsible.
+
+**What I recommend:**
+- **For emergencies:** Call your local emergency number (911 in the US) immediately.
+- **For medical concerns:** Please consult a licensed healthcare professional or physician.
+- **For mental health support:** Reach out to the [988 Suicide & Crisis Lifeline](https://988lifeline.org/) (call/text 988 in the US) or contact a mental health professional.
+- **For eating disorders:** Contact the [National Eating Disorders Association](https://www.nationaleatingdisorders.org/) helpline at 1-800-931-2237.
+
+> **Disclaimer:** I am an AI fitness assistant, not a medical professional. I cannot diagnose, treat, or provide medical advice. Always seek qualified professional guidance for health concerns.
+
+I'm here to help with your **training, nutrition, and fitness goals** whenever you're ready! 💪"""
 
 
 # Define the state for our agents
@@ -164,6 +203,63 @@ class FitnessAgents:
                 add_diary_entry,
             ]
         )
+
+    def _detect_medical_keywords(self, text: str):
+        """Two-tier keyword detection for medical/safety topics.
+        Returns: ('high', matched) | ('medium', matched) | ('safe', None)
+        """
+        text_lower = text.lower()
+        for pattern in MEDICAL_KEYWORDS_HIGH:
+            if re.search(pattern, text_lower):
+                return ("high", pattern)
+        for pattern in MEDICAL_KEYWORDS_MEDIUM:
+            if re.search(pattern, text_lower):
+                return ("medium", pattern)
+        return ("safe", None)
+
+    async def safety_guard(self, state: AgentState):
+        """Safety/Medical Guard Agent — pre-routing layer that intercepts
+        medical, emergency, or mental-health queries before they reach
+        specialist agents.  Uses a two-tier detection strategy:
+          1. Regex keyword scan (fast, deterministic)
+          2. LLM confirmation for medium-risk matches (avoids false positives)
+        """
+        last_msg = state["messages"][-1]
+        content = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
+
+        severity, matched = self._detect_medical_keywords(content)
+
+        if severity == "high":
+            # High-risk: immediately return disclaimer — no LLM call needed
+            return {
+                "messages": [AIMessage(content=SAFETY_DISCLAIMER, name="safety_guard")],
+                "active_agent": "safety_guard",
+            }
+
+        if severity == "medium":
+            # Medium-risk: ask the LLM to confirm whether this is truly medical
+            confirm_prompt = f"""You are a safety classifier for a fitness chatbot.
+Determine if the following user message is asking for MEDICAL ADVICE, 
+INJURY TREATMENT, MENTAL HEALTH COUNSELING, or involves an EATING DISORDER.
+
+If the message is a general fitness/nutrition question that happens to mention 
+a medical term casually (e.g., "my doctor said I'm healthy" or 
+"I recovered from an injury, what exercises can I do?"), classify it as SAFE.
+
+User message: "{content}"
+
+Respond with exactly one word: MEDICAL or SAFE."""
+            response = await self.llm.ainvoke(confirm_prompt)
+            classification = response.content.strip().upper()
+
+            if "MEDICAL" in classification:
+                return {
+                    "messages": [AIMessage(content=SAFETY_DISCLAIMER, name="safety_guard")],
+                    "active_agent": "safety_guard",
+                }
+
+        # Safe — pass through to orchestrator (no message added)
+        return {"active_agent": "safe"}
 
     def summarize_conversation(self, state: AgentState):
         """Condense long conversation history into a concise summary."""
@@ -375,23 +471,36 @@ def create_fitness_graph():
         ]
     )
 
+    # Add all nodes — safety_guard is the new entry point
+    workflow.add_node("safety_guard", agents.safety_guard)
     workflow.add_node("orchestrator", agents.orchestrator)
     workflow.add_node("coach", agents.coach_agent)
     workflow.add_node("nutrition", agents.nutrition_agent)
     workflow.add_node("aggregator", agents.aggregator)
     workflow.add_node("tools", tools_node)
 
+    # Entry point: every message goes through the safety guard first
+    workflow.set_entry_point("safety_guard")
 
-    # Simplified Sequence logic
-    workflow.set_entry_point("orchestrator")
+    # Safety guard routing: if flagged → END, otherwise → orchestrator
+    def after_safety_guard(state: AgentState):
+        if state.get("active_agent") == "safety_guard":
+            return END  # Medical/safety topic detected — response already set
+        return "orchestrator"  # Safe — proceed to normal routing
 
+    workflow.add_conditional_edges(
+        "safety_guard",
+        after_safety_guard,
+        {END: END, "orchestrator": "orchestrator"},
+    )
+
+    # Orchestrator decides which specialist agents to invoke
     def sequencer_routing(state: AgentState):
         planned = state.get("planned_agents", [])
         if not planned:
             return END
         return planned[0]
 
-    # After planning, go to the first agent
     workflow.add_conditional_edges("orchestrator", sequencer_routing)
 
     # Routing logic after an agent speaks

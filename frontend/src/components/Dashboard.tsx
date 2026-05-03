@@ -28,6 +28,8 @@ export default function Dashboard() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  const filteredWeightData = data.weight_progress;
+
   useEffect(() => {
     setIsMounted(true);
     const fetchDashboardData = async (background = false) => {
@@ -180,15 +182,12 @@ export default function Dashboard() {
             <h3 className="text-xl font-semibold flex items-center gap-2">
               <TrendingUp className="text-primary" /> Weight Progress
             </h3>
-            <select className="bg-transparent border-none text-sm text-gray-400 focus:ring-0">
-              <option>Last 7 Days</option>
-              <option>Last 30 Days</option>
-            </select>
+            <div className="text-sm text-gray-400">Last 7 Days</div>
           </div>
           <div className="h-[300px] w-full min-h-[300px] relative">
             {isMounted && (
               <ResponsiveContainer width="99%" height={300}>
-                <AreaChart data={data.weight_progress.length > 0 ? data.weight_progress : weightData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <AreaChart data={filteredWeightData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorWeight" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#00d4ff" stopOpacity={0.3}/>

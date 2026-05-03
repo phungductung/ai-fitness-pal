@@ -361,25 +361,42 @@ async def get_dashboard_data():
     except Exception:
         diary = []
 
-    # Format data for the chart
+    # Format data for the chart - Real-time last 30 days with gap filling
+    unique_days = {entry["date"]: entry["weight"] for entry in diary if entry.get("weight") is not None}
+    
     weight_progress = []
-    for entry in diary:
-        if entry.get("weight") is not None:
-            # Format date to Mon, Tue, etc.
-            try:
-                dt = datetime.datetime.strptime(entry["date"], "%Y-%m-%d")
-                day_name = dt.strftime("%a")
-                weight_progress.append(
-                    {
-                        "date": day_name,
-                        "weight": entry["weight"],
-                        "full_date": entry["date"],
-                    }
-                )
-            except Exception:
-                weight_progress.append(
-                    {"date": entry["date"], "weight": entry["weight"]}
-                )
+    today = datetime.date.today()
+    
+    # We'll fill gaps by looking for the last known weight
+    last_known_weight = None
+    
+    # First, find the oldest weight if we don't have one for the start of our 30-day window
+    # Sort all dates we have to find the most recent weight before our window if needed
+    all_dates_with_weight = sorted(unique_days.keys())
+    
+    for i in range(6, -1, -1):
+        target_date = today - datetime.timedelta(days=i)
+        date_str = target_date.isoformat()
+        
+        current_weight = unique_days.get(date_str)
+        
+        if current_weight is not None:
+            last_known_weight = current_weight
+        elif last_known_weight is None:
+            # If we don't have a weight yet for this period, look back in our 100 entries
+            # to find the most recent weight before this 7-day window
+            older_weights = [unique_days[d] for d in all_dates_with_weight if d < date_str]
+            if older_weights:
+                last_known_weight = older_weights[-1]
+            else:
+                # Fallback if absolutely no weight data exists yet
+                last_known_weight = 0 
+        
+        weight_progress.append({
+            "date": target_date.strftime("%a"),
+            "weight": last_known_weight,
+            "full_date": date_str
+        })
 
     # Get today's stats
     today_stats = {"calories": 0, "protein": 0, "weight": 0, "recovery": 88}

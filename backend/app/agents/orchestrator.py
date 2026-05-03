@@ -263,14 +263,38 @@ a medical term casually (e.g., "my doctor said I'm healthy" or
 User message: "{content}"
 
 Respond with exactly one word: MEDICAL or SAFE."""
-            response = await self.llm.ainvoke(confirm_prompt)
-            classification = response.content.strip().upper()
+            try:
+                response = await self.llm.ainvoke(confirm_prompt)
+                classification = response.content.strip().upper()
 
-            if "MEDICAL" in classification:
+                if "MEDICAL" in classification:
+                    return {
+                        "messages": [AIMessage(content=SAFETY_DISCLAIMER, name="safety_guard")],
+                        "active_agent": "safety_guard",
+                    }
+            except Exception:
+                return {"active_agent": "error"}
+
+        # LLM-based Guardrail for general relevance and harmfulness
+        guard_prompt = f"""You are a strict input filter for a fitness AI.
+Determine if the user's message contains ANY questions or statements relevant to fitness, nutrition, health, or using this app.
+
+User message: "{content}"
+
+If the message contains AT LEAST ONE relevant fitness/health topic (even if it also contains off-topic questions), or is a normal conversational greeting, respond with "PASS".
+If the message is ENTIRELY off-topic (e.g., ONLY about coding, politics, etc.) or is harmful, respond with a polite, one-sentence refusal explaining that you are a fitness assistant.
+"""
+        try:
+            response = await self.llm.ainvoke(guard_prompt)
+            result = response.content.strip()
+
+            if result.upper() != "PASS" and "PASS" not in result.upper():
                 return {
-                    "messages": [AIMessage(content=SAFETY_DISCLAIMER, name="safety_guard")],
-                    "active_agent": "safety_guard",
+                    "messages": [AIMessage(content=result, name="safety_guard")],
+                    "active_agent": "safety_guard"
                 }
+        except Exception:
+            return {"active_agent": "error"}
 
         # Safe — pass through to orchestrator (no message added)
         return {"active_agent": "safe"}
@@ -303,13 +327,18 @@ User Message: "{content}"
 
 Priority: If both are needed, put the most relevant one first."""
 
-        decision: OrchestratorDecision = structured_llm.invoke(prompt)
-        planned = decision.agents if decision.agents else ["coach"]
+        try:
+            decision: OrchestratorDecision = structured_llm.invoke(prompt)
+            planned = decision.agents if decision.agents else ["coach"]
+        except Exception:
+            return {"active_agent": "error"}
 
         return {"planned_agents": planned}
 
     def sequencer(self, state: AgentState):
         """Routes to the next agent in the planned sequence."""
+        if state.get("active_agent") == "error":
+            return "fallback"
         planned = state.get("planned_agents", [])
         if not planned:
             return END
@@ -347,6 +376,7 @@ Priority: If both are needed, put the most relevant one first."""
         system_msg = SystemMessage(
             content="""You are an Expert Strength Coach. Focus ONLY on training, rest times, and recovery. 
             If the user asked about nutrition, your colleague the Nutritionist will handle that next, so do NOT give nutrition advice yourself. 
+            If the user asked ANY completely unrelated questions (e.g., coding, politics), explicitly but politely refuse to answer that specific part.
             
             You have access to:
             1. 'get_personal_records': Use this to find the user's lift history and PRs.
@@ -364,7 +394,10 @@ Priority: If both are needed, put the most relevant one first."""
             multimodal_content = self._get_multimodal_content(file_path)
             input_messages.append(HumanMessage(content=multimodal_content))
             
-        response = await self.llm_with_tools.ainvoke(input_messages)
+        try:
+            response = await self.llm_with_tools.ainvoke(input_messages)
+        except Exception:
+            return {"active_agent": "error"}
         
         # If calling a tool, keep the agent active and don't remove from plan
         if response.tool_calls:
@@ -388,6 +421,7 @@ Priority: If both are needed, put the most relevant one first."""
         system_msg = SystemMessage(
             content="""You are a Senior Nutritionist. Focus ONLY on diet, calories, and supplements. 
             If the user asked about training, your colleague the Strength Coach will handle that, so do NOT give workout advice yourself. 
+            If the user asked ANY completely unrelated questions (e.g., coding, politics), explicitly but politely refuse to answer that specific part.
             
             PRIORITY FOR INFORMATION:
             1. Use 'query_fitness_diary' to find what the user has eaten, their weight history, or other logs.
@@ -403,7 +437,10 @@ Priority: If both are needed, put the most relevant one first."""
             multimodal_content = self._get_multimodal_content(file_path)
             input_messages.append(HumanMessage(content=multimodal_content))
             
-        response = await self.llm_with_tools.ainvoke(input_messages)
+        try:
+            response = await self.llm_with_tools.ainvoke(input_messages)
+        except Exception:
+            return {"active_agent": "error"}
         
         # If calling a tool, keep active
         if response.tool_calls:
@@ -422,14 +459,9 @@ Priority: If both are needed, put the most relevant one first."""
         """Blends outputs from multiple agents into a single cohesive response."""
         outputs = state.get("intermediate_outputs", [])
         if not outputs:
-            return {"messages": [AIMessage(content="I'm not sure how to help with that specifically.")]}
+            return {"messages": [AIMessage(content="I'm not sure how to help with that specifically.", name="assistant")]}
 
-        if len(outputs) == 1:
-            # Only one agent responded, return it as assistant
-            return {"messages": [AIMessage(content=outputs[0]["content"], name="assistant")]}
-
-
-        # Multiple agents, blend them
+        # Always blend/rewrite to ensure a consistent premium tone and trigger token streaming
         blend_prompt = f"""
         You are the Head AI Fitness Assistant. You need to blend advice from your specialists into a single, cohesive, and premium response.
         
@@ -441,15 +473,31 @@ Priority: If both are needed, put the most relevant one first."""
         2. Do NOT use sign-offs or signatures (e.g., 'Best regards', 'Your Fitness Assistant').
         3. Do NOT say 'Coach says X and Nutritionist says Y'. 
         4. Go STRAIGHT to the advice and information.
-        5. Create a unified narrative that flows logically.
-        6. Use clean Markdown formatting.
-        7. Maintain a natural, expert, and direct conversational tone.
+        5. If the specialists refused to answer an unrelated part of the user's prompt (e.g., coding, politics), ensure that refusal is naturally included in your response.
+        6. Create a unified narrative that flows logically.
+        7. Use clean Markdown formatting.
+        8. Maintain a natural, expert, and direct conversational tone.
         """
         
-        response = await self.llm.ainvoke(blend_prompt)
-        # Force the name to 'assistant' for consistent UI display
-        response.name = "assistant"
-        return {"messages": [response], "intermediate_outputs": []} # Clear intermediate for next turn
+        try:
+            response = await self.llm.ainvoke(blend_prompt)
+            # Force the name to 'assistant' for consistent UI display
+            response.name = "assistant"
+            return {"messages": [response], "intermediate_outputs": []} # Clear intermediate for next turn
+        except Exception:
+            return {"active_agent": "error"}
+
+    def fallback(self, state: AgentState):
+        """Fallback node to handle errors gracefully."""
+        error_msg = AIMessage(
+            content="I'm sorry, I encountered a technical difficulty while processing your request. Please try again later.",
+            name="assistant"
+        )
+        return {
+            "messages": [error_msg],
+            "active_agent": "fallback",
+            "planned_agents": []
+        }
 
 
 
@@ -477,6 +525,12 @@ def create_fitness_graph():
         add_diary_entry,
     ]
     tools_node = ToolNode(all_tools)
+
+    async def safe_tools_node(state: AgentState):
+        try:
+            return await tools_node.ainvoke(state)
+        except Exception:
+            return {"active_agent": "error"}
 
     # --- Human Review Node (interrupt before destructive actions) ---
     def human_review(state: AgentState):
@@ -547,13 +601,16 @@ def create_fitness_graph():
     workflow.add_node("nutrition", agents.nutrition_agent)
     workflow.add_node("aggregator", agents.aggregator)
     workflow.add_node("human_review", human_review)
-    workflow.add_node("tools", tools_node)
+    workflow.add_node("tools", safe_tools_node)
+    workflow.add_node("fallback", agents.fallback)
 
     # Entry point: every message goes through the safety guard first
     workflow.set_entry_point("safety_guard")
 
     # Safety guard routing: if flagged → END, otherwise → orchestrator
     def after_safety_guard(state: AgentState):
+        if state.get("active_agent") == "error":
+            return "fallback"
         if state.get("active_agent") == "safety_guard":
             return END  # Medical/safety topic detected — response already set
         return "orchestrator"  # Safe — proceed to normal routing
@@ -561,11 +618,13 @@ def create_fitness_graph():
     workflow.add_conditional_edges(
         "safety_guard",
         after_safety_guard,
-        {END: END, "orchestrator": "orchestrator"},
+        {END: END, "orchestrator": "orchestrator", "fallback": "fallback"},
     )
 
     # Orchestrator decides which specialist agents to invoke
     def sequencer_routing(state: AgentState):
+        if state.get("active_agent") == "error":
+            return "fallback"
         planned = state.get("planned_agents", [])
         if not planned:
             return END
@@ -575,6 +634,9 @@ def create_fitness_graph():
 
     # Routing logic after an agent speaks
     def after_agent(state: AgentState):
+        if state.get("active_agent") == "error":
+            return "fallback"
+
         last_message = state["messages"][-1]
         # Only AIMessages have tool_calls attribute
         if isinstance(last_message, AIMessage) and last_message.tool_calls:
@@ -600,7 +662,8 @@ def create_fitness_graph():
             "human_review": "human_review",
             "coach": "coach",
             "nutrition": "nutrition",
-            "aggregator": "aggregator"
+            "aggregator": "aggregator",
+            "fallback": "fallback"
         }
     )
 
@@ -612,12 +675,22 @@ def create_fitness_graph():
             "human_review": "human_review",
             "coach": "coach",
             "nutrition": "nutrition",
-            "aggregator": "aggregator"
+            "aggregator": "aggregator",
+            "fallback": "fallback"
         }
     )
 
     # After aggregator, we are definitely done
-    workflow.add_edge("aggregator", END)
+    def after_aggregator(state: AgentState):
+        if state.get("active_agent") == "error":
+            return "fallback"
+        return END
+
+    workflow.add_conditional_edges(
+        "aggregator",
+        after_aggregator,
+        {END: END, "fallback": "fallback"}
+    )
 
     # After human_review: if cancelled → END, otherwise → tools
     def after_human_review(state: AgentState):
@@ -633,9 +706,13 @@ def create_fitness_graph():
 
     # After tools, go back to the active agent to interpret results
     def after_tools(state: AgentState):
+        if state.get("active_agent") == "error":
+            return "fallback"
         return state.get("active_agent", "coach")
 
     workflow.add_conditional_edges("tools", after_tools)
+    
+    workflow.add_edge("fallback", END)
 
     # Compile with checkpointer for persistent memory
     # and interrupt_before for human-in-the-loop on the review node

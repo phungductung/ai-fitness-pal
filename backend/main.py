@@ -118,9 +118,10 @@ async def chat_endpoint(request: ChatRequest):
                 metadata = event.get("metadata", {})
                 node_name = metadata.get("langgraph_node")
 
-                # Only stream tokens from user-facing nodes
-                user_facing_nodes = ["aggregator", "safety_guard"]
-                if kind == "on_chain_start" and node_name in user_facing_nodes:
+                # Only stream tokens from specific nodes to avoid bleeding internal LLM thoughts
+                streamable_nodes = ["aggregator"]
+                user_facing_nodes = ["aggregator", "safety_guard", "fallback"]
+                if kind == "on_chain_start" and node_name in streamable_nodes:
                     current_node = "assistant"
                     print(f"Entering agent node: {node_name}")
                 elif kind == "on_chain_start" and node_name and not node_name.startswith("__"):
@@ -219,8 +220,9 @@ async def resume_chat(request: ResumeRequest):
                 metadata = event.get("metadata", {})
                 node_name = metadata.get("langgraph_node")
 
-                user_facing_nodes = ["aggregator", "safety_guard", "human_review"]
-                if kind == "on_chain_start" and node_name in user_facing_nodes:
+                streamable_nodes = ["aggregator", "human_review"]
+                user_facing_nodes = ["aggregator", "safety_guard", "human_review", "fallback"]
+                if kind == "on_chain_start" and node_name in streamable_nodes:
                     current_node = "assistant"
                 elif kind == "on_chain_start" and node_name and not node_name.startswith("__"):
                     current_node = None

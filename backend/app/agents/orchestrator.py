@@ -25,7 +25,6 @@ from app.tools.schemas import (
     SuggestMacrosInput,
     VisualizeProgressInput,
     QueryKnowledgeGraphInput,
-    SearchResearchDatabaseInput,
     SearchLatestFitnessResearchInput,
     QueryFitnessDiaryInput,
     AddPersonalRecordInput,
@@ -134,36 +133,22 @@ def visualize_progress(exercise: str):
 
 
 @tool(args_schema=QueryKnowledgeGraphInput)
-def query_knowledge_graph(query: str):
-    """Query the internal knowledge graph for relationships between supplements, biological effects, and fitness goals.
-    Use this for high-level relationships (e.g., 'What are the biological effects of X?').
+def query_knowledge_graph(topic: str, topic_type: str):
+    """Query the internal Neo4j knowledge graph for fitness relationships.
+    Use this to find what a supplement does, or what supplements to recommend for a specific goal.
     """
     from app.rag.graph_rag import FitnessGraphRAG
     rag = FitnessGraphRAG()
-    # Basic logic: if query contains a supplement name, query it
-    supplements = ["Whey Protein", "Creatine Monohydrate", "Beta-Alanine", "Ashwagandha"]
-    for s in supplements:
-        if s.lower() in query.lower():
-            return json.dumps(rag.query_supplement(s))
-    return "No specific supplement found in the knowledge graph for this query. Try searching the research database."
-
-@tool(args_schema=SearchResearchDatabaseInput)
-def search_research_database(query: str):
-    """Search the internal vector database for detailed scientific research snippets.
-    Use this for specific biological mechanisms or detailed evidence.
-    """
-    from app.rag.vector_rag import FitnessVectorRAG
-    api_key = os.getenv("OPENAI_API_KEY")
-    rag = FitnessVectorRAG(api_key)
-    
-    # Simple hardcoded snippets for demonstration if DB is empty
-    snippets = [
-        "Ashwagandha (Withania somnifera) is an adaptogen that has been shown to significantly reduce serum cortisol levels in chronically stressed adults.",
-        "Clinical trials suggest that Ashwagandha supplementation is associated with muscle mass increase and strength gains in conjunction with resistance training.",
-        "The primary bioactive constituents of Ashwagandha are withanolides, which mediate its anti-stress and anti-inflammatory effects."
-    ]
-    rag.initialize_with_texts(snippets)
-    return json.dumps(rag.search(query))
+    try:
+        if topic_type == "supplement":
+            result = rag.query_supplement(topic)
+        elif topic_type == "goal":
+            result = rag.get_recommendations_for_goal(topic)
+        else:
+            return "Invalid topic_type."
+        return json.dumps(result)
+    finally:
+        rag.close()
 
 
 @tool(args_schema=SearchLatestFitnessResearchInput)
@@ -225,7 +210,6 @@ class FitnessAgents:
                 suggest_macros,
                 visualize_progress,
                 query_knowledge_graph,
-                search_research_database,
                 search_latest_fitness_research,
                 get_personal_records,
                 query_fitness_diary,
@@ -408,9 +392,8 @@ Priority: If both are needed, put the most relevant one first."""
             PRIORITY FOR INFORMATION:
             1. Use 'query_fitness_diary' to find what the user has eaten, their weight history, or other logs.
             2. Use 'add_diary_entry' to log new meals, calories, protein intake, or current body weight.
-            3. Use 'query_knowledge_graph' for high-level relationships and biological effects of supplements.
-            4. Use 'search_research_database' for specific scientific snippets and mechanisms.
-            5. Use 'search_latest_fitness_research' (Tavily) ONLY if internal tools are insufficient.
+            3. Use 'query_knowledge_graph' to get exact connections between Supplements, Goals (like Hypertrophy, Recovery), and Biological Effects.
+            4. Use 'search_latest_fitness_research' (Tavily) to search the web for any specific scientific studies or unstructured fitness questions not found in the graph.
             
             Format with clear Markdown."""
         )
@@ -487,7 +470,6 @@ def create_fitness_graph():
         suggest_macros,
         visualize_progress,
         query_knowledge_graph,
-        search_research_database,
         search_latest_fitness_research,
         get_personal_records,
         query_fitness_diary,

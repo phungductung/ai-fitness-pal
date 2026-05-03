@@ -119,22 +119,27 @@ class VisualizeProgressInput(BaseModel):
 
 class QueryKnowledgeGraphInput(BaseModel):
     """Input schema for knowledge-graph queries."""
-    query: str = Field(
+    topic: str = Field(
         ...,
-        description="Natural-language query about supplements or fitness concepts.",
+        description="The specific name of the Supplement (e.g., 'Caffeine', 'Ashwagandha') or Fitness Goal (e.g., 'Recovery', 'Hypertrophy') you want to look up.",
         min_length=2,
-        max_length=500,
+        max_length=100,
+    )
+    topic_type: str = Field(
+        ...,
+        description="Must be either 'supplement' or 'goal'.",
     )
 
+    @field_validator("topic_type")
+    @classmethod
+    def validate_type(cls, v: str) -> str:
+        allowed = {"supplement", "goal"}
+        if v.strip().lower() not in allowed:
+            raise ValueError(f"topic_type must be one of {allowed}")
+        return v.strip().lower()
 
-class SearchResearchDatabaseInput(BaseModel):
-    """Input schema for vector-database research search."""
-    query: str = Field(
-        ...,
-        description="Search query for scientific research snippets.",
-        min_length=2,
-        max_length=500,
-    )
+
+
 
 
 class SearchLatestFitnessResearchInput(BaseModel):

@@ -61,7 +61,15 @@ async def chat_endpoint(request: ChatRequest):
 
     # Resolve or create a thread_id
     thread_id = request.thread_id or str(uuid.uuid4())
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "tags": ["chat_endpoint", "fitness_app"],
+        "metadata": {
+            "session_id": thread_id,
+            "user_id": "default_user",
+            "endpoint": "/chat"
+        }
+    }
 
     async def event_generator():
         # Send the thread_id first so the frontend can track it
@@ -188,7 +196,16 @@ async def chat_endpoint(request: ChatRequest):
 async def resume_chat(request: ResumeRequest):
     """Resume a paused graph after human-in-the-loop interrupt.
     The frontend sends this after the user approves or rejects a destructive action."""
-    config = {"configurable": {"thread_id": request.thread_id}}
+    config = {
+        "configurable": {"thread_id": request.thread_id},
+        "tags": ["resume_chat", "fitness_app"],
+        "metadata": {
+            "session_id": request.thread_id,
+            "user_id": "default_user",
+            "endpoint": "/chat/resume",
+            "approved": request.approved
+        }
+    }
     resume_value = "yes" if request.approved else "no"
 
     async def event_generator():

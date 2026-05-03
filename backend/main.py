@@ -344,6 +344,43 @@ async def get_dashboard_data():
         "today_stats": today_stats
     }
 
+
+# --- Cache Management Endpoints ---
+@app.get("/cache/stats")
+async def cache_stats():
+    """Return LLM cache statistics (number of cached entries)."""
+    import sqlite3
+    cache_path = os.path.join(os.path.dirname(__file__), ".cache", "llm_cache.db")
+    if not os.path.exists(cache_path):
+        return {"enabled": True, "entries": 0, "size_kb": 0}
+    try:
+        conn = sqlite3.connect(cache_path)
+        cursor = conn.execute("SELECT COUNT(*) FROM full_llm_cache")
+        count = cursor.fetchone()[0]
+        conn.close()
+        size_kb = round(os.path.getsize(cache_path) / 1024, 1)
+        return {"enabled": True, "entries": count, "size_kb": size_kb}
+    except Exception as e:
+        return {"enabled": True, "entries": "unknown", "error": str(e)}
+
+
+@app.delete("/cache/clear")
+async def cache_clear():
+    """Clear the entire LLM cache."""
+    import sqlite3
+    cache_path = os.path.join(os.path.dirname(__file__), ".cache", "llm_cache.db")
+    if not os.path.exists(cache_path):
+        return {"status": "ok", "message": "Cache already empty"}
+    try:
+        conn = sqlite3.connect(cache_path)
+        conn.execute("DELETE FROM full_llm_cache")
+        conn.commit()
+        conn.close()
+        return {"status": "ok", "message": "Cache cleared successfully"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

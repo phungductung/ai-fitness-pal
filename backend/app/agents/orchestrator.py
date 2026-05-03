@@ -31,6 +31,19 @@ from app.tools.schemas import (
     AddDiaryEntryInput,
 )
 
+# --- Semantic LLM Cache ---
+# Caches exact prompt→response pairs in a local SQLite DB.
+# If the user asks the exact same question twice, the answer is returned
+# instantly without hitting OpenAI — saving money and latency.
+from langchain_core.globals import set_llm_cache
+from langchain_community.cache import SQLiteCache
+
+_cache_dir = os.path.join(os.path.dirname(__file__), "..", "..", ".cache")
+os.makedirs(_cache_dir, exist_ok=True)
+_cache_db = os.path.join(_cache_dir, "llm_cache.db")
+set_llm_cache(SQLiteCache(database_path=_cache_db))
+print(f"[LLM Cache] SQLite semantic cache enabled at {_cache_db}")
+
 
 # --- Structured Output Model for Orchestrator Routing ---
 class OrchestratorDecision(BaseModel):

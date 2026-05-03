@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Send, Paperclip, Loader2, Plus, ShieldCheck, ShieldX } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Send, Paperclip, Loader2, Plus, ShieldCheck, ShieldX, WifiOff, Zap } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -22,6 +22,13 @@ interface AttachedFile {
   serverPath: string;
 }
 
+/** Measures stream latency */
+interface StreamMetrics {
+  firstTokenMs: number | null;
+  totalMs: number | null;
+  cached: boolean;
+}
+
 interface InterruptData {
   type: string;
   thread_id: string;
@@ -33,13 +40,17 @@ export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [pendingInterrupt, setPendingInterrupt] = useState<InterruptData | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [streamMetrics, setStreamMetrics] = useState<StreamMetrics | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -71,12 +82,20 @@ export default function Chat() {
     }
   };
 
-  const handleNewChat = React.useCallback(async () => {
+  const handleNewChat = useCallback(async () => {
+    // Abort any in-flight stream to prevent orphaned responses
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
     setMessages([]);
     setInput('');
     setIsLoading(false);
+    setIsStreaming(false);
     setAttachedFile(null);
     setPendingInterrupt(null);
+    setConnectionError(null);
+    setStreamMetrics(null);
     // Request a fresh thread_id from the backend
     try {
       const res = await fetch('http://localhost:8000/chat/new', { method: 'POST' });
@@ -212,6 +231,16 @@ export default function Chat() {
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
+    setIsStreaming(false);
+    setConnectionError(null);
+    setStreamMetrics(null);
+
+    // Create an AbortController so we can cancel on new-chat
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    const streamStartTime = performance.now();
+    let firstTokenTime: number | null = null;
 
     try {
       console.log("Sending message to backend...");
@@ -234,9 +263,14 @@ export default function Chat() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
 
       setAttachedFile(null);
+
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      }
 
       if (!response.body) {
         console.error("No response body received");
@@ -275,6 +309,18 @@ export default function Chat() {
           if (data === 'end' || event === 'done') {
             console.log("Stream ended");
             setIsLoading(false);
+            setIsStreaming(false);
+            // Record total stream duration
+            const totalMs = Math.round(performance.now() - streamStartTime);
+            const isCached = firstTokenTime !== null && firstTokenTime < 200;
+            setStreamMetrics({
+              firstTokenMs: firstTokenTime,
+              totalMs,
+              cached: isCached,
+            });
+            if (isCached) {
+              console.log(`⚡ Cache hit — response in ${totalMs}ms`);
+            }
             window.dispatchEvent(new CustomEvent('data-updated'));
             continue;
           }
@@ -299,9 +345,21 @@ export default function Chat() {
               const interruptData = JSON.parse(data);
               setPendingInterrupt(interruptData);
               setIsLoading(false);
+              setIsStreaming(false);
               console.log("Interrupt received:", interruptData);
             } catch (e) {
               console.error("Error parsing interrupt event:", data, e);
+            }
+            continue;
+          }
+
+          // --- Handle error events from the backend ---
+          if (event === 'error') {
+            try {
+              const errData = JSON.parse(data);
+              setConnectionError(errData.error || 'An unexpected error occurred');
+            } catch {
+              setConnectionError(data);
             }
             continue;
           }
@@ -314,6 +372,12 @@ export default function Chat() {
                              parsedData.sender || 'assistant';
 
               if (event === 'token' && parsedData.token) {
+                // Track first-token latency
+                if (firstTokenTime === null) {
+                  firstTokenTime = Math.round(performance.now() - streamStartTime);
+                  console.log(`First token in ${firstTokenTime}ms`);
+                }
+                setIsStreaming(true);
                 setMessages(prev => {
                   const lastMsg = prev[prev.length - 1];
                   if (lastMsg && lastMsg.role === 'assistant' && lastMsg.sender === sender) {
@@ -328,6 +392,7 @@ export default function Chat() {
                   }
                 });
               } else if (event === 'message' && parsedData.content) {
+                setIsStreaming(false);
                 setMessages(prev => {
                   const lastMsg = prev[prev.length - 1];
                   if (lastMsg && lastMsg.role === 'assistant' && lastMsg.sender === sender) {
@@ -350,10 +415,21 @@ export default function Chat() {
           }
         }
       }
-    } catch (error) {
-      console.error("Chat error:", error);
+    } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        console.log('Stream aborted (new chat or navigation)');
+      } else {
+        console.error("Chat error:", error);
+        setConnectionError(
+          error?.message?.includes('Failed to fetch')
+            ? 'Cannot reach the backend server. Is it running on port 8000?'
+            : `Connection error: ${error?.message || 'Unknown error'}`
+        );
+      }
     } finally {
       setIsLoading(false);
+      setIsStreaming(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -386,8 +462,25 @@ export default function Chat() {
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((msg, i) => (
-          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+        {/* Connection error banner */}
+        {connectionError && (
+          <div className="connection-error flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs">
+            <WifiOff size={14} />
+            <span>{connectionError}</span>
+            <button
+              onClick={() => setConnectionError(null)}
+              className="ml-auto text-red-300 hover:text-white transition"
+            >
+              <Plus size={14} className="rotate-45" />
+            </button>
+          </div>
+        )}
+
+        {messages.map((msg, i) => {
+          const isLastAssistant = msg.role === 'assistant' && i === messages.length - 1;
+          const showCursor = isLastAssistant && isStreaming;
+          return (
+          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} message-enter`}>
             <div className={`max-w-[80%] p-3 rounded-2xl ${
               msg.role === 'user' 
                 ? 'bg-primary text-black rounded-tr-none' 
@@ -397,9 +490,15 @@ export default function Chat() {
                 <div className="text-[10px] uppercase font-bold text-gray-400 mb-1 flex items-center gap-1">
                   {msg.sender === 'coach' ? <Dumbbell size={10} /> : <Utensils size={10} />}
                   {msg.sender}
+                  {/* Show cache badge on the last assistant message if it was a cache hit */}
+                  {isLastAssistant && !isStreaming && streamMetrics?.cached && (
+                    <span className="cache-badge cache-badge--hit ml-1">
+                      <Zap size={8} /> cached
+                    </span>
+                  )}
                 </div>
               )}
-              <div className="text-sm markdown-content">
+              <div className={`text-sm markdown-content ${showCursor ? 'streaming-cursor' : ''}`}>
                 {msg.attachment && (
                   <div className="mb-2">
                     {msg.attachment?.type?.startsWith('image/') ? (
@@ -434,7 +533,8 @@ export default function Chat() {
               </div>
             </div>
           </div>
-        ))}
+          );
+        })}
 
         {/* --- Human-in-the-Loop Confirmation Card --- */}
         {pendingInterrupt && (
@@ -527,9 +627,17 @@ export default function Chat() {
             <Send size={20} />
           </button>
         </div>
-        <p className="text-[10px] text-gray-500 mt-2 text-center">
-          Multimodal support: Drop a supplement image or training PDF to analyze.
-        </p>
+        <div className="flex items-center justify-center gap-2 mt-2">
+          <p className="text-[10px] text-gray-500 text-center">
+            Multimodal support: Drop a supplement image or training PDF to analyze.
+          </p>
+          {streamMetrics && (
+            <span className="text-[9px] text-gray-600 font-mono">
+              {streamMetrics.cached ? '⚡' : '🕐'} {streamMetrics.totalMs}ms
+              {streamMetrics.firstTokenMs !== null && ` (TTFT: ${streamMetrics.firstTokenMs}ms)`}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Image Preview Modal */}

@@ -1,22 +1,48 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Paperclip, Mic, User, Bot, Loader2, Plus, RotateCcw } from 'lucide-react';
+import { Send, Paperclip, Loader2, Plus, ShieldCheck, ShieldX } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  sender?: string;
+  attachment?: {
+    name: string;
+    type: string;
+    serverPath: string;
+  } | null;
+}
+
+interface AttachedFile {
+  name: string;
+  type: string;
+  serverPath: string;
+}
+
+interface InterruptData {
+  type: string;
+  thread_id: string;
+  question: string;
+  tool_calls: any[];
+}
+
 export default function Chat() {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [attachedFile, setAttachedFile] = useState(null);
+  const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [previewImage, setPreviewImage] = useState(null);
-  const scrollRef = useRef(null);
-  const fileInputRef = useRef(null);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [pendingInterrupt, setPendingInterrupt] = useState<InterruptData | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileChange = async (e) => {
-    const file = e.target.files[0];
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (!file) return;
 
     setIsUploading(true);
@@ -45,11 +71,20 @@ export default function Chat() {
     }
   };
 
-  const handleNewChat = React.useCallback(() => {
+  const handleNewChat = React.useCallback(async () => {
     setMessages([]);
     setInput('');
     setIsLoading(false);
     setAttachedFile(null);
+    setPendingInterrupt(null);
+    // Request a fresh thread_id from the backend
+    try {
+      const res = await fetch('http://localhost:8000/chat/new', { method: 'POST' });
+      const data = await res.json();
+      setThreadId(data.thread_id);
+    } catch {
+      setThreadId(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -62,18 +97,116 @@ export default function Chat() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, pendingInterrupt]);
+
+  // --- Handle human-in-the-loop approval/rejection ---
+  const handleInterruptResponse = async (approved: boolean) => {
+    if (!pendingInterrupt?.thread_id) return;
+
+    setPendingInterrupt(null);
+    setIsLoading(true);
+
+    // Add a system-style message showing what the user decided
+    const decisionMsg: ChatMessage = {
+      role: 'user' as const,
+      content: approved ? '✅ Approved' : '❌ Rejected',
+    };
+    setMessages(prev => [...prev, decisionMsg]);
+
+    try {
+      const response = await fetch('http://localhost:8000/chat/resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          thread_id: pendingInterrupt.thread_id,
+          approved,
+        }),
+      });
+
+      if (!response.body) return;
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split(/\n\n|\r\n\r\n/);
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+          if (!part.trim()) continue;
+
+          const lines = part.split('\n');
+          let event = 'message';
+          let data = '';
+
+          for (const line of lines) {
+            const cleanLine = line.trim();
+            if (cleanLine.startsWith('event: ')) event = cleanLine.replace('event: ', '').trim();
+            else if (cleanLine.startsWith('data: ')) data = cleanLine.replace('data: ', '').trim();
+          }
+
+          if (data === 'end' || event === 'done') {
+            setIsLoading(false);
+            window.dispatchEvent(new CustomEvent('data-updated'));
+            continue;
+          }
+
+          if (data) {
+            try {
+              const parsedData = JSON.parse(data);
+              const sender = parsedData.sender || 'assistant';
+
+              if (event === 'token' && parsedData.token) {
+                setMessages(prev => {
+                  const lastMsg = prev[prev.length - 1];
+                  if (lastMsg && lastMsg.role === 'assistant' && lastMsg.sender === sender) {
+                    const newMessages = [...prev];
+                    newMessages[newMessages.length - 1] = { ...lastMsg, content: lastMsg.content + parsedData.token };
+                    return newMessages;
+                  }
+                  return [...prev, { role: 'assistant', content: parsedData.token, sender }];
+                });
+              } else if (event === 'message' && parsedData.content) {
+                setMessages(prev => {
+                  const lastMsg = prev[prev.length - 1];
+                  if (lastMsg && lastMsg.role === 'assistant' && lastMsg.sender === sender) {
+                    const newMessages = [...prev];
+                    if (parsedData.content.length >= lastMsg.content.length - 5) {
+                      newMessages[newMessages.length - 1] = { ...lastMsg, content: parsedData.content };
+                    }
+                    return newMessages;
+                  }
+                  return [...prev, { role: 'assistant', content: parsedData.content, sender }];
+                });
+              }
+            } catch (e) {
+              console.error("Error parsing resume response:", data, e);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Resume error:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSend = async () => {
     if (!input.trim()) return;
 
-    const userMessage = { 
-      role: 'user', 
+    const userMessage: ChatMessage = { 
+      role: 'user' as const, 
       content: input,
       attachment: attachedFile ? { ...attachedFile } : null 
     };
-    const currentInput = input; // Capture current input
-    const currentHistory = [...messages]; // Capture current history
+    const currentInput = input;
+    const currentHistory = [...messages]; // Legacy: only used on first message if no threadId
     const currentFile = attachedFile;
     
     setMessages(prev => [...prev, userMessage]);
@@ -82,11 +215,20 @@ export default function Chat() {
 
     try {
       console.log("Sending message to backend...");
-      const payload = { 
+      const payload: Record<string, any> = { 
         message: currentInput, 
-        history: currentHistory,
-        file_path: currentFile?.serverPath || null
+        file_path: currentFile?.serverPath || null,
       };
+
+      // Attach thread_id for persistent sessions
+      if (threadId) {
+        payload.thread_id = threadId;
+      }
+
+      // Only send history on the very first message (backwards-compat)
+      if (!threadId) {
+        payload.history = currentHistory;
+      }
       
       const response = await fetch('http://localhost:8000/chat', {
         method: 'POST',
@@ -94,7 +236,7 @@ export default function Chat() {
         body: JSON.stringify(payload),
       });
 
-      setAttachedFile(null); // Clear after sending
+      setAttachedFile(null);
 
       if (!response.body) {
         console.error("No response body received");
@@ -111,7 +253,6 @@ export default function Chat() {
         
         buffer += decoder.decode(value, { stream: true });
         
-        // Split by double newline to get individual SSE events
         const parts = buffer.split(/\n\n|\r\n\r\n/);
         buffer = parts.pop() || ''; 
         
@@ -135,6 +276,33 @@ export default function Chat() {
             console.log("Stream ended");
             setIsLoading(false);
             window.dispatchEvent(new CustomEvent('data-updated'));
+            continue;
+          }
+
+          // --- Handle thread_id assignment from backend ---
+          if (event === 'thread') {
+            try {
+              const threadData = JSON.parse(data);
+              if (threadData.thread_id) {
+                setThreadId(threadData.thread_id);
+                console.log("Thread ID set:", threadData.thread_id);
+              }
+            } catch (e) {
+              console.error("Error parsing thread event:", data, e);
+            }
+            continue;
+          }
+
+          // --- Handle human-in-the-loop interrupt ---
+          if (event === 'interrupt') {
+            try {
+              const interruptData = JSON.parse(data);
+              setPendingInterrupt(interruptData);
+              setIsLoading(false);
+              console.log("Interrupt received:", interruptData);
+            } catch (e) {
+              console.error("Error parsing interrupt event:", data, e);
+            }
             continue;
           }
           
@@ -201,6 +369,11 @@ export default function Chat() {
             <Plus size={20} />
           </button>
           <h3 className="font-semibold text-lg">AI Chatbot</h3>
+          {threadId && (
+            <span className="text-[9px] text-gray-600 font-mono ml-1 hidden sm:inline" title={`Thread: ${threadId}`}>
+              🔗 {threadId.slice(0, 8)}…
+            </span>
+          )}
         </div>
         <div className="flex -space-x-2">
           <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center border-2 border-[#141414]">
@@ -229,12 +402,12 @@ export default function Chat() {
               <div className="text-sm markdown-content">
                 {msg.attachment && (
                   <div className="mb-2">
-                    {msg.attachment.type.startsWith('image/') ? (
+                    {msg.attachment?.type?.startsWith('image/') ? (
                       <img 
-                        src={`http://localhost:8000/${msg.attachment.serverPath}`} 
+                        src={`http://localhost:8000/${msg.attachment?.serverPath}`} 
                         alt="attachment" 
                         className="max-w-full rounded-lg border border-white/10 cursor-zoom-in hover:opacity-90 transition-opacity"
-                        onClick={() => setPreviewImage(`http://localhost:8000/${msg.attachment.serverPath}`)}
+                        onClick={() => setPreviewImage(`http://localhost:8000/${msg.attachment?.serverPath}`)}
                       />
                     ) : (
                       <div className="flex items-center gap-2 p-2 bg-white/10 rounded-lg border border-white/10 w-fit">
@@ -251,7 +424,7 @@ export default function Chat() {
                       <img 
                         {...props} 
                         className="max-w-full rounded-lg border border-white/10 my-2 cursor-zoom-in hover:opacity-90 transition-opacity" 
-                        onClick={() => setPreviewImage(props.src)}
+                        onClick={() => setPreviewImage(typeof props.src === 'string' ? props.src : null)}
                       />
                     )
                   }}
@@ -262,6 +435,40 @@ export default function Chat() {
             </div>
           </div>
         ))}
+
+        {/* --- Human-in-the-Loop Confirmation Card --- */}
+        {pendingInterrupt && (
+          <div className="flex justify-start">
+            <div className="max-w-[85%] p-4 rounded-2xl rounded-tl-none bg-gradient-to-br from-amber-500/10 to-orange-500/10 border border-amber-500/30 backdrop-blur-sm">
+              <div className="text-[10px] uppercase font-bold text-amber-400 mb-2 flex items-center gap-1">
+                <ShieldCheck size={12} />
+                Confirmation Required
+              </div>
+              <div className="text-sm markdown-content mb-4">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {pendingInterrupt.question}
+                </ReactMarkdown>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleInterruptResponse(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-400 rounded-xl text-xs font-semibold transition-all duration-200 hover:scale-105"
+                >
+                  <ShieldCheck size={14} />
+                  Approve
+                </button>
+                <button
+                  onClick={() => handleInterruptResponse(false)}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-400 rounded-xl text-xs font-semibold transition-all duration-200 hover:scale-105"
+                >
+                  <ShieldX size={14} />
+                  Reject
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {isLoading && messages.length > 0 && messages[messages.length - 1].role === 'user' && (
           <div className="flex justify-start">
             <div className="bg-white/5 border border-white/10 p-4 rounded-2xl rounded-tl-none flex gap-1 items-center">
@@ -300,7 +507,7 @@ export default function Chat() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             placeholder={isUploading ? "Uploading file..." : "Ask about your workout, nutrition, or PRs..."}
-            disabled={isUploading}
+            disabled={isUploading || !!pendingInterrupt}
             className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:ring-1 focus:ring-primary focus:border-transparent outline-none transition-all disabled:opacity-50"
           />
           <button 
@@ -312,9 +519,9 @@ export default function Chat() {
           </button>
           <button 
             onClick={handleSend}
-            disabled={isLoading || isUploading || (!input.trim() && !attachedFile)}
+            disabled={isLoading || isUploading || !!pendingInterrupt || (!input.trim() && !attachedFile)}
             className={`absolute right-3 top-1/2 -translate-y-1/2 transition-all duration-200 ${
-              isLoading || isUploading || (!input.trim() && !attachedFile) ? 'text-gray-600 cursor-not-allowed scale-95' : 'text-primary hover:text-white scale-100 hover:scale-110'
+              isLoading || isUploading || !!pendingInterrupt || (!input.trim() && !attachedFile) ? 'text-gray-600 cursor-not-allowed scale-95' : 'text-primary hover:text-white scale-100 hover:scale-110'
             }`}
           >
             <Send size={20} />
@@ -349,10 +556,10 @@ export default function Chat() {
   );
 }
 
-function Dumbbell({ size, className }) {
+function Dumbbell({ size, className }: { size: number; className?: string }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m6.5 6.5 11 11"/><path d="m10 10 5.5 5.5"/><path d="m3 21 8-8"/><path d="m9 22 10-10"/><path d="m2 19 10-10"/><path d="m14 11 8 8"/><path d="m15 10 7-7"/><path d="m19 2 3 3"/></svg>;
 }
 
-function Utensils({ size, className }) {
+function Utensils({ size, className }: { size: number; className?: string }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>;
 }

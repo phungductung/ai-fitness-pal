@@ -3,10 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langgraph.types import Command
 import asyncio
 import json
 import os
 import datetime
+import uuid
 from typing import List, Optional
 from dotenv import load_dotenv
 
@@ -38,66 +40,85 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     message: str
-    history: List[dict] = []
+    thread_id: Optional[str] = None  # If None, a new thread is created
+    history: List[dict] = []  # Kept for backwards-compat but no longer required
     file_path: Optional[str] = None
+
+
+class ResumeRequest(BaseModel):
+    thread_id: str
+    approved: bool  # True = proceed, False = cancel
+
+
+# --- Compile graph once at module level ---
+graph = create_fitness_graph()
 
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
-    """Streaming endpoint for multi-agent conversation using astream_events."""
-    graph = create_fitness_graph()
-    
+    """Streaming endpoint for multi-agent conversation.
+    Uses LangGraph checkpointer for persistent threads —
+    the frontend only needs to send the latest message + thread_id."""
+
+    # Resolve or create a thread_id
+    thread_id = request.thread_id or str(uuid.uuid4())
+    config = {"configurable": {"thread_id": thread_id}}
+
     async def event_generator():
-        # Convert history to LangGraph message format
-        history_messages = [SystemMessage(content="You are AI Fitness Pal, a comprehensive health and fitness architect. You help users with workouts, nutrition, and progress tracking using your specialized coach and nutrition agents.")]
-        for msg in request.history:
-            role = msg.get("role")
-            content = msg.get("content")
-            if role == "user":
-                history_messages.append(HumanMessage(content=content))
-            elif role == "assistant":
-                history_messages.append(AIMessage(content=content))
-        
-        # Add the new message
-        history_messages.append(HumanMessage(content=request.message))
-        
-        # Pass file path into the state if provided
+        # Send the thread_id first so the frontend can track it
+        yield f"event: thread\ndata: {json.dumps({'thread_id': thread_id})}\n\n"
+
+        # Build input messages.  On the first turn we include the system prompt;
+        # on subsequent turns the checkpointer already has it.
+        current_state = await graph.aget_state(config)
+        is_new_thread = not current_state.values.get("messages")
+
+        input_messages = []
+        if is_new_thread:
+            input_messages.append(
+                SystemMessage(
+                    content="You are AI Fitness Pal, a comprehensive health and fitness architect. "
+                            "You help users with workouts, nutrition, and progress tracking "
+                            "using your specialized coach and nutrition agents."
+                )
+            )
+            # Include any legacy history for backwards-compat on the first message
+            for msg in request.history:
+                role = msg.get("role")
+                content = msg.get("content")
+                if role == "user":
+                    input_messages.append(HumanMessage(content=content))
+                elif role == "assistant":
+                    input_messages.append(AIMessage(content=content))
+
+        # Add the new user message
+        input_messages.append(HumanMessage(content=request.message))
+
         inputs = {
-            "messages": history_messages,
+            "messages": input_messages,
             "data_context": {"file_path": request.file_path} if request.file_path else {},
-            "intermediate_outputs": []
+            "intermediate_outputs": [],
         }
 
-        
         # Track the active node to associate tokens with a sender
         current_node = "assistant"
-        
-        print(f"Starting stream for message: {request.message[:50]}...")
-        
+
+        print(f"[thread={thread_id}] Starting stream for: {request.message[:50]}...")
+
         try:
-            async for event in graph.astream_events(inputs, version="v2"):
+            async for event in graph.astream_events(inputs, version="v2", config=config):
                 kind = event["event"]
                 metadata = event.get("metadata", {})
                 node_name = metadata.get("langgraph_node")
-                
-                # Only set current_node when entering a user-facing agent node
-                # This acts as a 'gatekeeper' for the UI
-                # Only set current_node for the aggregator to ensure a single blended response
+
+                # Only stream tokens from user-facing nodes
                 user_facing_nodes = ["aggregator", "safety_guard"]
                 if kind == "on_chain_start" and node_name in user_facing_nodes:
-                    current_node = "assistant" # Group all blended output under 'assistant'
+                    current_node = "assistant"
                     print(f"Entering agent node: {node_name}")
-
-
                 elif kind == "on_chain_start" and node_name and not node_name.startswith("__"):
-                    # For all other nodes (orchestrator, tools, etc.), set current_node to None
-                    # to prevent any tokens from leaking to the UI
                     current_node = None
 
-                # Only stream tokens if we are currently inside a user-facing node
-                # Only stream tokens from the aggregator
                 if kind == "on_chat_model_stream" and current_node == "assistant":
-
-
                     content = event["data"]["chunk"].content
                     if content:
                         data = json.dumps({
@@ -106,9 +127,8 @@ async def chat_endpoint(request: ChatRequest):
                             "type": "text"
                         })
                         yield f"event: token\ndata: {data}\n\n"
-                        
+
                 elif kind == "on_chain_end" and node_name in user_facing_nodes:
-                    # When a user-facing node finishes, send its final output messages
                     output = event["data"].get("output")
                     if output and "messages" in output:
                         last_msg = output["messages"][-1]
@@ -117,9 +137,8 @@ async def chat_endpoint(request: ChatRequest):
                             content = last_msg.content
                         elif isinstance(last_msg, dict):
                             content = last_msg.get("content", "")
-                        
+
                         if isinstance(content, str) and content.strip():
-                            # Map 'aggregator' to 'assistant' for the final message too
                             sender_name = "assistant" if node_name == "aggregator" else node_name
                             data = json.dumps({
                                 "sender": sender_name,
@@ -128,15 +147,99 @@ async def chat_endpoint(request: ChatRequest):
                             })
                             yield f"event: message\ndata: {data}\n\n"
                             print(f"Finished agent node: {node_name}")
+
+            # --- After streaming finishes, check for an interrupt ---
+            final_state = await graph.aget_state(config)
+            if final_state.next:  # Graph is paused at an interrupt
+                # The interrupt payload contains the confirmation question
+                interrupt_data = None
+                if final_state.tasks:
+                    for task in final_state.tasks:
+                        if hasattr(task, "interrupts") and task.interrupts:
+                            interrupt_data = task.interrupts[0].value
+                            break
+
+                confirmation = interrupt_data or {
+                    "question": "A destructive action is pending. Do you approve?"
+                }
+                data = json.dumps({
+                    "type": "interrupt",
+                    "thread_id": thread_id,
+                    "question": confirmation.get("question", str(confirmation)),
+                    "tool_calls": confirmation.get("tool_calls", []),
+                })
+                yield f"event: interrupt\ndata: {data}\n\n"
+                print(f"[thread={thread_id}] Interrupted — awaiting human approval")
+
         except Exception as e:
             print(f"Error in event_generator: {e}")
+            import traceback
+            traceback.print_exc()
             error_data = json.dumps({"error": str(e)})
             yield f"event: error\ndata: {error_data}\n\n"
-        
+
         yield "event: done\ndata: end\n\n"
 
     from fastapi.responses import StreamingResponse
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.post("/chat/resume")
+async def resume_chat(request: ResumeRequest):
+    """Resume a paused graph after human-in-the-loop interrupt.
+    The frontend sends this after the user approves or rejects a destructive action."""
+    config = {"configurable": {"thread_id": request.thread_id}}
+    resume_value = "yes" if request.approved else "no"
+
+    async def event_generator():
+        current_node = None
+
+        try:
+            async for event in graph.astream_events(
+                Command(resume=resume_value), version="v2", config=config
+            ):
+                kind = event["event"]
+                metadata = event.get("metadata", {})
+                node_name = metadata.get("langgraph_node")
+
+                user_facing_nodes = ["aggregator", "safety_guard", "human_review"]
+                if kind == "on_chain_start" and node_name in user_facing_nodes:
+                    current_node = "assistant"
+                elif kind == "on_chain_start" and node_name and not node_name.startswith("__"):
+                    current_node = None
+
+                if kind == "on_chat_model_stream" and current_node == "assistant":
+                    content = event["data"]["chunk"].content
+                    if content:
+                        data = json.dumps({"sender": "assistant", "token": content, "type": "text"})
+                        yield f"event: token\ndata: {data}\n\n"
+
+                elif kind == "on_chain_end" and node_name in user_facing_nodes:
+                    output = event["data"].get("output")
+                    if output and "messages" in output:
+                        last_msg = output["messages"][-1]
+                        content = last_msg.content if hasattr(last_msg, "content") else ""
+                        if isinstance(content, str) and content.strip():
+                            data = json.dumps({"sender": "assistant", "content": content, "type": "text"})
+                            yield f"event: message\ndata: {data}\n\n"
+
+        except Exception as e:
+            print(f"Error in resume_chat: {e}")
+            import traceback
+            traceback.print_exc()
+            error_data = json.dumps({"error": str(e)})
+            yield f"event: error\ndata: {error_data}\n\n"
+
+        yield "event: done\ndata: end\n\n"
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.post("/chat/new")
+async def new_chat():
+    """Create a fresh thread_id for a new conversation."""
+    return {"thread_id": str(uuid.uuid4())}
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...), type: str = Form(...)):

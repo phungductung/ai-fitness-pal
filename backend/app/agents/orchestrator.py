@@ -1,4 +1,4 @@
-from typing import TypedDict, Annotated, List, Union
+from typing import TypedDict, Annotated, List, Literal, Union
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import (
@@ -9,13 +9,30 @@ from langchain_core.messages import (
     SystemMessage,
 )
 from langgraph.graph.message import add_messages
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import interrupt, Command
 from langchain_core.tools import tool
 from langchain_tavily import TavilySearch as TavilySearchResults
 from langgraph.prebuilt import ToolNode
+from pydantic import BaseModel, Field
 import json
 import os
 import re
 from app.utils.mcp_client import get_mcp_client
+
+
+# --- Structured Output Model for Orchestrator Routing ---
+class OrchestratorDecision(BaseModel):
+    """Routing decision from the orchestrator — which specialist agents to invoke."""
+    agents: List[Literal["coach", "nutrition"]] = Field(
+        description="Ordered list of specialist agents to invoke. "
+                    "Put the most relevant agent first. "
+                    "Options: 'coach' (training/exercise/recovery) or 'nutrition' (diet/calories/supplements)."
+    )
+
+
+# --- Destructive tool names that require human confirmation ---
+DESTRUCTIVE_TOOLS = {"add_personal_record", "add_diary_entry"}
 
 
 # --- Safety / Medical Guard Constants ---
@@ -64,6 +81,7 @@ class AgentState(TypedDict):
     data_context: dict  # Stores data retrieved from MCP or RAG
     summary: str  # Condensed history to manage token limits
     intermediate_outputs: List[dict] # Stores raw responses from agents for blending
+    pending_tool_calls: List[dict]  # Tool calls awaiting human approval
 
 
 
@@ -273,34 +291,25 @@ Respond with exactly one word: MEDICAL or SAFE."""
         return {"summary": response.content, "messages": messages[-4:]}
 
     def orchestrator(self, state: AgentState):
-        """Decides which agents should participate in the conversation."""
+        """Decides which agents should participate in the conversation.
+        Uses structured output (Pydantic model) for guaranteed valid routing."""
         last_msg = state["messages"][-1]
         content = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
-        
-        prompt = f"""
-        Analyze the user's message and decide which agents should respond. 
-        You can pick one or both.
-        - 'coach': For training, exercise, rest, and recovery.
-        - 'nutrition': For diet, calories, macros, and supplements.
-        
-        User Message: "{content}"
-        
-        Respond with a JSON list of agent names, e.g., ["coach"] or ["nutrition", "coach"].
-        Priority: If both are needed, put the most relevant one first.
-        """
-        
-        response = self.llm.invoke(prompt)
-        try:
-            cleaned_content = response.content.strip()
-            if "```json" in cleaned_content:
-                cleaned_content = cleaned_content.split("```json")[1].split("```")[0].strip()
-            
-            planned = json.loads(cleaned_content)
-            if not isinstance(planned, list) or not planned: 
-                planned = ["coach"]
-        except Exception as e:
-            planned = ["coach"]
-            
+
+        structured_llm = self.llm.with_structured_output(OrchestratorDecision)
+
+        prompt = f"""Analyze the user's message and decide which agents should respond.
+You can pick one or both.
+- 'coach': For training, exercise, rest, and recovery.
+- 'nutrition': For diet, calories, macros, and supplements.
+
+User Message: "{content}"
+
+Priority: If both are needed, put the most relevant one first."""
+
+        decision: OrchestratorDecision = structured_llm.invoke(prompt)
+        planned = decision.agents if decision.agents else ["coach"]
+
         return {"planned_agents": planned}
 
     def sequencer(self, state: AgentState):
@@ -450,26 +459,92 @@ Respond with exactly one word: MEDICAL or SAFE."""
 
 
 # --- Building the Graph ---
+
+# Module-level checkpointer so it persists across requests
+_checkpointer = MemorySaver()
+
+
 def create_fitness_graph():
     agents = FitnessAgents()
     workflow = StateGraph(AgentState)
 
-    # Define tools node
-    tools_node = ToolNode(
-        [
-            calculate_1rm,
-            calculate_tdee,
-            suggest_macros,
-            visualize_progress,
-            query_knowledge_graph,
-            search_research_database,
-            search_latest_fitness_research,
-            get_personal_records,
-            query_fitness_diary,
-            add_personal_record,
-            add_diary_entry,
+    # Define tools node for safe (read-only) tools
+    all_tools = [
+        calculate_1rm,
+        calculate_tdee,
+        suggest_macros,
+        visualize_progress,
+        query_knowledge_graph,
+        search_research_database,
+        search_latest_fitness_research,
+        get_personal_records,
+        query_fitness_diary,
+        add_personal_record,
+        add_diary_entry,
+    ]
+    tools_node = ToolNode(all_tools)
+
+    # --- Human Review Node (interrupt before destructive actions) ---
+    def human_review(state: AgentState):
+        """Intercept destructive tool calls and ask the user for confirmation
+        via a LangGraph interrupt.  Non-destructive calls pass through."""
+        last_message = state["messages"][-1]
+
+        if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
+            return {}  # Nothing to review
+
+        destructive_calls = [
+            tc for tc in last_message.tool_calls if tc["name"] in DESTRUCTIVE_TOOLS
         ]
-    )
+
+        if not destructive_calls:
+            return {}  # All calls are safe — skip review
+
+        # Build a human-readable summary of what is about to happen
+        descriptions = []
+        for tc in destructive_calls:
+            if tc["name"] == "add_diary_entry":
+                args = tc["args"]
+                descriptions.append(
+                    f"📝 **Log diary entry:** \"{args.get('entry', '')}\" "
+                    f"({args.get('calories', 0)} kcal, {args.get('protein', 0)}g protein"
+                    + (f", {args.get('weight')} kg" if args.get('weight') else "")
+                    + ")"
+                )
+            elif tc["name"] == "add_personal_record":
+                args = tc["args"]
+                descriptions.append(
+                    f"🏋️ **Log PR:** {args.get('exercise', '?')} — "
+                    f"{args.get('weight', 0)} kg × {args.get('reps', 0)} reps"
+                )
+
+        summary = "\n".join(descriptions)
+        confirmation_msg = (
+            f"I'm about to make the following changes:\n\n{summary}\n\n"
+            "**Do you approve?** Reply `yes` to confirm or `no` to cancel."
+        )
+
+        # Interrupt execution — the graph pauses here until the user resumes
+        human_response = interrupt({
+            "question": confirmation_msg,
+            "tool_calls": [tc for tc in destructive_calls],
+        })
+
+        # When resumed, human_response is the value passed via Command(resume=...)
+        if isinstance(human_response, str) and human_response.lower().strip() in ("yes", "y", "approve", "confirm"):
+            # Approved — proceed (the tool node will execute next)
+            return {}
+        else:
+            # Rejected — replace the AI message's tool calls with a cancellation
+            cancel_msg = AIMessage(
+                content="✅ Got it — I've cancelled that action. No changes were made.",
+                name="assistant",
+            )
+            return {
+                "messages": [cancel_msg],
+                "active_agent": "cancelled",
+                "planned_agents": [],
+            }
 
     # Add all nodes — safety_guard is the new entry point
     workflow.add_node("safety_guard", agents.safety_guard)
@@ -477,6 +552,7 @@ def create_fitness_graph():
     workflow.add_node("coach", agents.coach_agent)
     workflow.add_node("nutrition", agents.nutrition_agent)
     workflow.add_node("aggregator", agents.aggregator)
+    workflow.add_node("human_review", human_review)
     workflow.add_node("tools", tools_node)
 
     # Entry point: every message goes through the safety guard first
@@ -508,8 +584,14 @@ def create_fitness_graph():
         last_message = state["messages"][-1]
         # Only AIMessages have tool_calls attribute
         if isinstance(last_message, AIMessage) and last_message.tool_calls:
+            # Check if any tool call is destructive → route to human review
+            has_destructive = any(
+                tc["name"] in DESTRUCTIVE_TOOLS for tc in last_message.tool_calls
+            )
+            if has_destructive:
+                return "human_review"
             return "tools"
-        
+
         # If no tool calls, check for next agent in sequence
         planned = state.get("planned_agents", [])
         if not planned:
@@ -521,7 +603,8 @@ def create_fitness_graph():
         after_agent,
         {
             "tools": "tools",
-            "coach": "coach", 
+            "human_review": "human_review",
+            "coach": "coach",
             "nutrition": "nutrition",
             "aggregator": "aggregator"
         }
@@ -532,6 +615,7 @@ def create_fitness_graph():
         after_agent,
         {
             "tools": "tools",
+            "human_review": "human_review",
             "coach": "coach",
             "nutrition": "nutrition",
             "aggregator": "aggregator"
@@ -541,6 +625,17 @@ def create_fitness_graph():
     # After aggregator, we are definitely done
     workflow.add_edge("aggregator", END)
 
+    # After human_review: if cancelled → END, otherwise → tools
+    def after_human_review(state: AgentState):
+        if state.get("active_agent") == "cancelled":
+            return END
+        return "tools"
+
+    workflow.add_conditional_edges(
+        "human_review",
+        after_human_review,
+        {"tools": "tools", END: END},
+    )
 
     # After tools, go back to the active agent to interpret results
     def after_tools(state: AgentState):
@@ -548,4 +643,9 @@ def create_fitness_graph():
 
     workflow.add_conditional_edges("tools", after_tools)
 
-    return workflow.compile()
+    # Compile with checkpointer for persistent memory
+    # and interrupt_before for human-in-the-loop on the review node
+    return workflow.compile(
+        checkpointer=_checkpointer,
+        interrupt_before=["human_review"],
+    )

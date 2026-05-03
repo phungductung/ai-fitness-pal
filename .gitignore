@@ -82,3 +82,9 @@ chroma_db/
 backend/static/*.mp3
 backend/static/temp_*
 frontend/.next/
+backend/static/*.png
+backend/scratch/
+
+# Testing & Evaluation
+backend/tests/eval_dataset.json
+backend/tests/eval_results.csv

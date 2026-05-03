@@ -121,19 +121,19 @@ class QueryKnowledgeGraphInput(BaseModel):
     """Input schema for knowledge-graph queries."""
     topic: str = Field(
         ...,
-        description="The specific name of the Supplement (e.g., 'Caffeine', 'Ashwagandha') or Fitness Goal (e.g., 'Recovery', 'Hypertrophy') you want to look up.",
+        description="The specific name of the Supplement (e.g., 'Caffeine'), Goal (e.g., 'Recovery'), Food Source (e.g., 'Milk'), or Condition (e.g., 'Hypertension') you want to look up.",
         min_length=2,
         max_length=100,
     )
     topic_type: str = Field(
         ...,
-        description="Must be either 'supplement' or 'goal'.",
+        description="Must be one of: 'supplement', 'goal', 'side_effects', 'synergy', 'food_source', or 'condition'.",
     )
 
     @field_validator("topic_type")
     @classmethod
     def validate_type(cls, v: str) -> str:
-        allowed = {"supplement", "goal"}
+        allowed = {"supplement", "goal", "side_effects", "synergy", "food_source", "condition"}
         if v.strip().lower() not in allowed:
             raise ValueError(f"topic_type must be one of {allowed}")
         return v.strip().lower()

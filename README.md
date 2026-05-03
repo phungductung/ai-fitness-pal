@@ -210,4 +210,39 @@ npm run dev
 -   **Protocols**: Model Context Protocol (MCP), SSE (Streaming).
 -   **Validation**: Pydantic v2 (Strict Tool Validation).
 
+---
+
+## 🧪 Testing & Evaluation
+
+This project includes a comprehensive testing and evaluation framework to ensure reliability and response quality.
+
+### Unit Tests
+Unit tests use `pytest` and `pytest-asyncio`. They test core logic and agent routing using mocks to avoid unnecessary API costs.
+
+To run unit tests:
+```bash
+cd backend
+PYTHONPATH=. pytest tests/
+```
+
+### Automated Evaluation (Golden Dataset)
+We use **Ragas** to measure the quality of the RAG responses against a "Golden Dataset".
+
+- **Files**: 
+  - `backend/tests/eval_dataset.json`: Golden dataset of diverse fitness questions.
+  - `backend/tests/run_evals.py`: Evaluation runner script.
+- **Metrics**: 
+  - **Faithfulness**: Detects hallucinations by verifying answers against retrieved context.
+  - **Answer Relevance**: Ensures the response directly addresses the user's query.
+
+#### Running Evaluations
+Requires an `OPENAI_API_KEY` for the Ragas evaluator.
+
+```bash
+cd backend
+PYTHONPATH=. python tests/run_evals.py
+```
+
+Results are saved to `backend/tests/eval_results.csv`.
+
 

@@ -233,7 +233,7 @@ class FitnessGraphRAG:
                 }
         except Exception as e:
             logger.error(f"Error querying supplement: {e}")
-            return f"Error querying database."
+            return "Error querying database."
 
     def get_recommendations_for_goal(self, goal: str):
         """Find supplements linked to a specific fitness goal."""
@@ -254,7 +254,7 @@ class FitnessGraphRAG:
                 return recs
         except Exception as e:
             logger.error(f"Error getting recommendations: {e}")
-            return f"Error querying database."
+            return "Error querying database."
 
     def query_side_effects(self, supplement_name: str):
         """Find side effects and precautions for a supplement."""
@@ -280,7 +280,7 @@ class FitnessGraphRAG:
                 }
         except Exception as e:
             logger.error(f"Error querying side effects: {e}")
-            return f"Error querying database."
+            return "Error querying database."
 
     def find_synergies(self, supplement_name: str):
         """Find supplements that work well with the given supplement."""
@@ -298,7 +298,7 @@ class FitnessGraphRAG:
                 return synergies
         except Exception as e:
             logger.error(f"Error finding synergies: {e}")
-            return f"Error querying database."
+            return "Error querying database."
 
     def find_food_sources(self, supplement_name: str):
         """Find whole food sources for a supplement."""
@@ -316,7 +316,7 @@ class FitnessGraphRAG:
                 return sources
         except Exception as e:
             logger.error(f"Error finding food sources: {e}")
-            return f"Error querying database."
+            return "Error querying database."
 
     def check_contraindications(self, condition: str):
         """Find supplements that are contraindicated for a specific condition."""
@@ -334,4 +334,4 @@ class FitnessGraphRAG:
                 return contras
         except Exception as e:
             logger.error(f"Error checking contraindications: {e}")
-            return f"Error querying database."
+            return "Error querying database."

@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
-from app.agents.orchestrator import FitnessAgents, AgentState, OrchestratorDecision
-from langchain_core.messages import HumanMessage, AIMessage
+from app.agents.orchestrator import FitnessAgents, OrchestratorDecision
+from langchain_core.messages import HumanMessage
 
 @pytest.fixture
 def fitness_agents():

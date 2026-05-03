@@ -1,4 +1,3 @@
-import pytest
 from app.tools.fitness_formulas import calculate_tdee, calculate_1rm, suggest_macros
 
 def test_calculate_tdee_male():

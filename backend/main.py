@@ -1,10 +1,8 @@
-from fastapi import FastAPI, UploadFile, File, Form, Depends
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langgraph.types import Command
-import asyncio
 import json
 import os
 import datetime
@@ -14,13 +12,12 @@ from dotenv import load_dotenv
 
 # Import our agents and tools (assuming they are in backend/app)
 from app.agents.orchestrator import create_fitness_graph
-from app.utils.multimodal import pdf_to_base64_images, encode_image
 from app.utils.mcp_client import get_mcp_client
+
+from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
 
-from fastapi.staticfiles import StaticFiles
-import os
 
 # Ensure static directory exists
 if not os.path.exists("static"):
@@ -38,6 +35,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 class ChatRequest(BaseModel):
     message: str
     thread_id: Optional[str] = None  # If None, a new thread is created
@@ -53,6 +51,7 @@ class ResumeRequest(BaseModel):
 # --- Compile graph once at module level ---
 graph = create_fitness_graph()
 
+
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     """Streaming endpoint for multi-agent conversation.
@@ -67,8 +66,8 @@ async def chat_endpoint(request: ChatRequest):
         "metadata": {
             "session_id": thread_id,
             "user_id": "default_user",
-            "endpoint": "/chat"
-        }
+            "endpoint": "/chat",
+        },
     }
 
     async def event_generator():
@@ -85,8 +84,8 @@ async def chat_endpoint(request: ChatRequest):
             input_messages.append(
                 SystemMessage(
                     content="You are AI Fitness Pal, a comprehensive health and fitness architect. "
-                            "You help users with workouts, nutrition, and progress tracking "
-                            "using your specialized coach and nutrition agents."
+                    "You help users with workouts, nutrition, and progress tracking "
+                    "using your specialized coach and nutrition agents."
                 )
             )
             # Include any legacy history for backwards-compat on the first message
@@ -103,7 +102,9 @@ async def chat_endpoint(request: ChatRequest):
 
         inputs = {
             "messages": input_messages,
-            "data_context": {"file_path": request.file_path} if request.file_path else {},
+            "data_context": {"file_path": request.file_path}
+            if request.file_path
+            else {},
             "intermediate_outputs": [],
         }
 
@@ -113,7 +114,9 @@ async def chat_endpoint(request: ChatRequest):
         print(f"[thread={thread_id}] Starting stream for: {request.message[:50]}...")
 
         try:
-            async for event in graph.astream_events(inputs, version="v2", config=config):
+            async for event in graph.astream_events(
+                inputs, version="v2", config=config
+            ):
                 kind = event["event"]
                 metadata = event.get("metadata", {})
                 node_name = metadata.get("langgraph_node")
@@ -124,17 +127,19 @@ async def chat_endpoint(request: ChatRequest):
                 if kind == "on_chain_start" and node_name in streamable_nodes:
                     current_node = "assistant"
                     print(f"Entering agent node: {node_name}")
-                elif kind == "on_chain_start" and node_name and not node_name.startswith("__"):
+                elif (
+                    kind == "on_chain_start"
+                    and node_name
+                    and not node_name.startswith("__")
+                ):
                     current_node = None
 
                 if kind == "on_chat_model_stream" and current_node == "assistant":
                     content = event["data"]["chunk"].content
                     if content:
-                        data = json.dumps({
-                            "sender": current_node,
-                            "token": content,
-                            "type": "text"
-                        })
+                        data = json.dumps(
+                            {"sender": current_node, "token": content, "type": "text"}
+                        )
                         yield f"event: token\ndata: {data}\n\n"
 
                 elif kind == "on_chain_end" and node_name in user_facing_nodes:
@@ -148,12 +153,16 @@ async def chat_endpoint(request: ChatRequest):
                             content = last_msg.get("content", "")
 
                         if isinstance(content, str) and content.strip():
-                            sender_name = "assistant" if node_name == "aggregator" else node_name
-                            data = json.dumps({
-                                "sender": sender_name,
-                                "content": content,
-                                "type": "text"
-                            })
+                            sender_name = (
+                                "assistant" if node_name == "aggregator" else node_name
+                            )
+                            data = json.dumps(
+                                {
+                                    "sender": sender_name,
+                                    "content": content,
+                                    "type": "text",
+                                }
+                            )
                             yield f"event: message\ndata: {data}\n\n"
                             print(f"Finished agent node: {node_name}")
 
@@ -171,18 +180,21 @@ async def chat_endpoint(request: ChatRequest):
                 confirmation = interrupt_data or {
                     "question": "A destructive action is pending. Do you approve?"
                 }
-                data = json.dumps({
-                    "type": "interrupt",
-                    "thread_id": thread_id,
-                    "question": confirmation.get("question", str(confirmation)),
-                    "tool_calls": confirmation.get("tool_calls", []),
-                })
+                data = json.dumps(
+                    {
+                        "type": "interrupt",
+                        "thread_id": thread_id,
+                        "question": confirmation.get("question", str(confirmation)),
+                        "tool_calls": confirmation.get("tool_calls", []),
+                    }
+                )
                 yield f"event: interrupt\ndata: {data}\n\n"
                 print(f"[thread={thread_id}] Interrupted — awaiting human approval")
 
         except Exception as e:
             print(f"Error in event_generator: {e}")
             import traceback
+
             traceback.print_exc()
             error_data = json.dumps({"error": str(e)})
             yield f"event: error\ndata: {error_data}\n\n"
@@ -190,6 +202,7 @@ async def chat_endpoint(request: ChatRequest):
         yield "event: done\ndata: end\n\n"
 
     from fastapi.responses import StreamingResponse
+
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
@@ -204,8 +217,8 @@ async def resume_chat(request: ResumeRequest):
             "session_id": request.thread_id,
             "user_id": "default_user",
             "endpoint": "/chat/resume",
-            "approved": request.approved
-        }
+            "approved": request.approved,
+        },
     }
     resume_value = "yes" if request.approved else "no"
 
@@ -221,30 +234,50 @@ async def resume_chat(request: ResumeRequest):
                 node_name = metadata.get("langgraph_node")
 
                 streamable_nodes = ["aggregator", "human_review"]
-                user_facing_nodes = ["aggregator", "safety_guard", "human_review", "fallback"]
+                user_facing_nodes = [
+                    "aggregator",
+                    "safety_guard",
+                    "human_review",
+                    "fallback",
+                ]
                 if kind == "on_chain_start" and node_name in streamable_nodes:
                     current_node = "assistant"
-                elif kind == "on_chain_start" and node_name and not node_name.startswith("__"):
+                elif (
+                    kind == "on_chain_start"
+                    and node_name
+                    and not node_name.startswith("__")
+                ):
                     current_node = None
 
                 if kind == "on_chat_model_stream" and current_node == "assistant":
                     content = event["data"]["chunk"].content
                     if content:
-                        data = json.dumps({"sender": "assistant", "token": content, "type": "text"})
+                        data = json.dumps(
+                            {"sender": "assistant", "token": content, "type": "text"}
+                        )
                         yield f"event: token\ndata: {data}\n\n"
 
                 elif kind == "on_chain_end" and node_name in user_facing_nodes:
                     output = event["data"].get("output")
                     if output and "messages" in output:
                         last_msg = output["messages"][-1]
-                        content = last_msg.content if hasattr(last_msg, "content") else ""
+                        content = (
+                            last_msg.content if hasattr(last_msg, "content") else ""
+                        )
                         if isinstance(content, str) and content.strip():
-                            data = json.dumps({"sender": "assistant", "content": content, "type": "text"})
+                            data = json.dumps(
+                                {
+                                    "sender": "assistant",
+                                    "content": content,
+                                    "type": "text",
+                                }
+                            )
                             yield f"event: message\ndata: {data}\n\n"
 
         except Exception as e:
             print(f"Error in resume_chat: {e}")
             import traceback
+
             traceback.print_exc()
             error_data = json.dumps({"error": str(e)})
             yield f"event: error\ndata: {error_data}\n\n"
@@ -252,6 +285,7 @@ async def resume_chat(request: ResumeRequest):
         yield "event: done\ndata: end\n\n"
 
     from fastapi.responses import StreamingResponse
+
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
@@ -260,16 +294,22 @@ async def new_chat():
     """Create a fresh thread_id for a new conversation."""
     return {"thread_id": str(uuid.uuid4())}
 
+
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...), type: str = Form(...)):
     """Handle image and PDF uploads for GPT-4o analysis."""
     file_path = f"static/temp_{file.filename}"
     with open(file_path, "wb") as f:
         f.write(await file.read())
-    
+
     # Logic to send to GPT-4o Vision would go here
     # For now, return a success message
-    return {"status": "success", "filename": file_path, "message": "File received for analysis"}
+    return {
+        "status": "success",
+        "filename": file_path,
+        "message": "File received for analysis",
+    }
+
 
 @app.get("/morning-briefing")
 async def morning_briefing():
@@ -277,40 +317,50 @@ async def morning_briefing():
     print("Received request for morning briefing")
     from app.utils.tts import MorningBriefing
     # from app.utils.mcp_client import get_local_data # Assuming this helper exists (commented out as it doesn't exist yet)
-    
+
     api_key = os.getenv("OPENAI_API_KEY")
     briefing_tool = MorningBriefing(api_key)
-    
+
     # Mocking data for now
     pr_data = [{"Exercise": "Deadlift", "Weight": 180}]
     nutrition_summary = {"calories": 2800, "protein_g": 200}
-    
+
     script = briefing_tool.compose_briefing_text(pr_data, nutrition_summary)
-    audio_path = briefing_tool.generate_briefing_audio(script, output_path="static/briefing.mp3")
-    
-    return {"status": "success", "audio_url": "/static/briefing.mp3", "script": script}
+    audio_path = briefing_tool.generate_briefing_audio(
+        script, output_path="static/briefing.mp3"
+    )
+
+    return {"status": "success", "audio_url": audio_path, "script": script}
+
 
 @app.get("/dashboard-data")
 async def get_dashboard_data():
     """Fetch real data for the dashboard from MCP."""
     client = get_mcp_client()
-    
+
     # Get PRs
     prs_json = await client.get_prs()
     try:
-        prs = json.loads(prs_json) if not prs_json.startswith("Error") and not prs_json == "No PR records found." else []
-    except:
+        prs = (
+            json.loads(prs_json)
+            if not prs_json.startswith("Error")
+            and not prs_json == "No PR records found."
+            else []
+        )
+    except Exception:
         prs = []
-    
+
     # Get Diary (last 7 entries)
-    diary_json = await client.query_diary("SELECT * FROM diary ORDER BY date DESC LIMIT 7")
+    diary_json = await client.query_diary(
+        "SELECT * FROM diary ORDER BY date DESC LIMIT 7"
+    )
     try:
         diary = json.loads(diary_json) if not diary_json.startswith("Error") else []
         # Sort back to ascending for the chart
         diary.sort(key=lambda x: x.get("date", ""))
-    except:
+    except Exception:
         diary = []
-    
+
     # Format data for the chart
     weight_progress = []
     for entry in diary:
@@ -319,18 +369,26 @@ async def get_dashboard_data():
             try:
                 dt = datetime.datetime.strptime(entry["date"], "%Y-%m-%d")
                 day_name = dt.strftime("%a")
-                weight_progress.append({"date": day_name, "weight": entry["weight"], "full_date": entry["date"]})
-            except:
-                weight_progress.append({"date": entry["date"], "weight": entry["weight"]})
+                weight_progress.append(
+                    {
+                        "date": day_name,
+                        "weight": entry["weight"],
+                        "full_date": entry["date"],
+                    }
+                )
+            except Exception:
+                weight_progress.append(
+                    {"date": entry["date"], "weight": entry["weight"]}
+                )
 
     # Get today's stats
     today_stats = {"calories": 0, "protein": 0, "weight": 0, "recovery": 88}
     if diary:
-        latest = diary[-1] # Now it's the latest because we sorted it ASC
+        latest = diary[-1]  # Now it's the latest because we sorted it ASC
         today_stats["calories"] = latest.get("calories", 0)
         today_stats["protein"] = latest.get("protein", 0)
         today_stats["weight"] = latest.get("weight", 0)
-        
+
         # Calculate recovery score
         sleep = latest.get("sleep_hours", 8.0)
         fatigue = latest.get("fatigue", 3)
@@ -338,11 +396,7 @@ async def get_dashboard_data():
         recovery_score = int((sleep / 8.0) * 100 - (fatigue * 5))
         today_stats["recovery"] = max(0, min(100, recovery_score))
 
-    return {
-        "prs": prs,
-        "weight_progress": weight_progress,
-        "today_stats": today_stats
-    }
+    return {"prs": prs, "weight_progress": weight_progress, "today_stats": today_stats}
 
 
 # --- Cache Management Endpoints ---
@@ -350,6 +404,7 @@ async def get_dashboard_data():
 async def cache_stats():
     """Return LLM cache statistics (number of cached entries)."""
     import sqlite3
+
     cache_path = os.path.join(os.path.dirname(__file__), ".cache", "llm_cache.db")
     if not os.path.exists(cache_path):
         return {"enabled": True, "entries": 0, "size_kb": 0}
@@ -368,6 +423,7 @@ async def cache_stats():
 async def cache_clear():
     """Clear the entire LLM cache."""
     import sqlite3
+
     cache_path = os.path.join(os.path.dirname(__file__), ".cache", "llm_cache.db")
     if not os.path.exists(cache_path):
         return {"status": "ok", "message": "Cache already empty"}
@@ -383,4 +439,5 @@ async def cache_clear():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

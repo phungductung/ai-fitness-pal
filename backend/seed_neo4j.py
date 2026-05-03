@@ -1,5 +1,4 @@
 from app.rag.graph_rag import FitnessGraphRAG
-import os
 from dotenv import load_dotenv
 
 # Load environment variables from .env

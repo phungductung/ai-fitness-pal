@@ -1,4 +1,3 @@
-import math
 import json
 
 
@@ -33,13 +32,19 @@ def suggest_macros(tdee: float, goal: str) -> str:
     """Suggest macros based on TDEE and goal (bulk, cut, maintain)."""
     if goal == "cut":
         calories = tdee - 500
-        protein_p = 0.4; fat_p = 0.3; carb_p = 0.3
+        protein_p = 0.4
+        fat_p = 0.3
+        carb_p = 0.3
     elif goal == "bulk":
         calories = tdee + 300
-        protein_p = 0.3; fat_p = 0.2; carb_p = 0.5
+        protein_p = 0.3
+        fat_p = 0.2
+        carb_p = 0.5
     else:
         calories = tdee
-        protein_p = 0.3; fat_p = 0.3; carb_p = 0.4
+        protein_p = 0.3
+        fat_p = 0.3
+        carb_p = 0.4
 
     macros = {
         "calories": calories,

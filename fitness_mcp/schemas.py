@@ -4,7 +4,7 @@ These schemas enforce domain-specific constraints directly at the
 MCP tool boundary so that invalid data never reaches Supabase.
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from typing import Optional
 
 
@@ -32,10 +32,16 @@ class AddPersonalRecordMCPInput(BaseModel):
 
 class QueryFitnessDiaryMCPInput(BaseModel):
     """Input schema for the query_fitness_diary MCP tool."""
-    query: str = Field(
-        default=None,
-        description="Optional search/filter query for diary entries.",
-        max_length=500,
+    limit: Optional[int] = Field(
+        default=10,
+        description="Number of entries to return.",
+        ge=1,
+        le=1000,
+    )
+    order: Optional[str] = Field(
+        default="desc",
+        description="Order of entries by date (asc or desc).",
+        pattern="^(asc|desc)$",
     )
 
 

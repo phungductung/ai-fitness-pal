@@ -1,6 +1,5 @@
 import os
 import sys
-import pandas as pd
 from mcp.server.fastmcp import FastMCP
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -94,25 +93,26 @@ def add_personal_record(exercise: str, weight: float, reps: int):
         return f"Error logging PR to Supabase: {str(e)}"
 
 @mcp.tool()
-def query_fitness_diary(query: str = None) -> str:
+def query_fitness_diary(limit: int = 10, order: str = "desc") -> str:
     """
     Query the fitness diary for weight history, calories, and logs.
     Uses the aggregated compatibility view in Supabase.
     Args:
-        query: Optional search/filter query (max 500 chars).
+        limit: Number of entries to return (default 10).
+        order: Sort order by date (asc or desc).
     """
     # --- Pydantic validation ---
-    if query is not None:
-        try:
-            validated = QueryFitnessDiaryMCPInput(query=query)
-        except ValidationError as e:
-            return f"Input validation error: {e}"
+    try:
+        validated = QueryFitnessDiaryMCPInput(limit=limit, order=order)
+    except ValidationError as e:
+        return f"Input validation error: {e}"
 
     if not supabase:
         return "Supabase client not initialized."
     try:
         # Fetch from the view that combines nutrition_logs and body_metrics
-        response = supabase.table("diary_entries_view").select("*").order("date", desc=True).limit(100).execute()
+        is_desc = validated.order == "desc"
+        response = supabase.table("diary_entries_view").select("*").order("date", desc=is_desc).limit(validated.limit).execute()
         if not response.data:
             return "No diary entries found in Supabase."
         

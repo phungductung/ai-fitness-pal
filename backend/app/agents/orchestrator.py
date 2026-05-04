@@ -30,6 +30,7 @@ from app.tools.schemas import (
     AddDiaryEntryInput,
 )
 
+
 # --- Semantic LLM Cache ---
 # Caches exact prompt→response pairs in a local SQLite DB.
 # If the user asks the exact same question twice, the answer is returned
@@ -37,11 +38,15 @@ from app.tools.schemas import (
 from langchain_core.globals import set_llm_cache
 from langchain_community.cache import SQLiteCache
 
+from app.utils.logger import get_logger, thread_id_var
+
+logger = get_logger("orchestrator")
+
 _cache_dir = os.path.join(os.path.dirname(__file__), "..", "..", ".cache")
 os.makedirs(_cache_dir, exist_ok=True)
 _cache_db = os.path.join(_cache_dir, "llm_cache.db")
 set_llm_cache(SQLiteCache(database_path=_cache_db))
-print(f"[LLM Cache] SQLite semantic cache enabled at {_cache_db}")
+logger.info(f"SQLite semantic cache enabled at {_cache_db}")
 
 
 # --- Structured Output Model for Orchestrator Routing ---
@@ -203,7 +208,7 @@ def visualize_progress(exercise: str):
 @tool(args_schema=QueryKnowledgeGraphInput)
 def query_knowledge_graph(topic: str, topic_type: str):
     """Query the internal Neo4j knowledge graph for fitness relationships.
-    Use this to find what a supplement does, what supplements to recommend for a specific goal, 
+    Use this to find what a supplement does, what supplements to recommend for a specific goal,
     or check for side effects, precautions, and synergies.
     """
     from app.rag.graph_rag import FitnessGraphRAG
@@ -248,18 +253,17 @@ async def get_personal_records():
     """Fetch the user's personal records (PRs) from their local fitness logs.
     Use this to answer questions about their heaviest lifts, best performances, or historical PR data.
     """
-    mcp = get_mcp_client()
+    mcp = get_mcp_client(thread_id=thread_id_var.get())
     return await mcp.get_prs()
 
 
 @tool(args_schema=QueryFitnessDiaryInput)
-async def query_fitness_diary(query: str):
-    """Execute a SQL query on the user's local fitness diary database.
-    The table name is 'diary'. Columns are: date (TEXT), entry (TEXT), calories (INTEGER), protein (INTEGER), weight (REAL).
-    Use this to find what the user ate, their calorie intake, weight history, or notes from specific days.
+async def query_fitness_diary(limit: int = 10, order: str = "desc"):
+    """Fetch entries from the user's local fitness diary database.
+    Useful for finding weight history, calorie intake, or activity logs.
     """
-    mcp = get_mcp_client()
-    return await mcp.query_diary(query)
+    mcp = get_mcp_client(thread_id=thread_id_var.get())
+    return await mcp.query_diary(limit=limit, order=order)
 
 
 @tool(args_schema=AddPersonalRecordInput)
@@ -267,7 +271,7 @@ async def add_personal_record(exercise: str, weight: float, reps: int):
     """Log a new personal record (PR) to the user's local fitness logs.
     Use this when the user reports a new best lift or wants to update their history.
     """
-    mcp = get_mcp_client()
+    mcp = get_mcp_client(thread_id=thread_id_var.get())
     return await mcp.add_pr(exercise, weight, reps)
 
 
@@ -278,7 +282,7 @@ async def add_diary_entry(
     """Add a new entry to the user's daily fitness diary.
     Use this when the user reports what they ate, their current weight, or wants to log their nutritional intake.
     """
-    mcp = get_mcp_client()
+    mcp = get_mcp_client(thread_id=thread_id_var.get())
     return await mcp.add_diary(entry, calories, protein, weight)
 
 
@@ -324,6 +328,7 @@ class FitnessAgents:
         last_msg = state["messages"][-1]
         content = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
 
+        logger.info("Entering safety_guard node")
         severity, matched = self._detect_medical_keywords(content)
 
         if severity == "high":
@@ -358,7 +363,11 @@ Respond with exactly one word: MEDICAL or SAFE."""
                         "active_agent": "safety_guard",
                     }
             except Exception as e:
-                print(f"Error in safety_guard (medium risk confirmation): {e}")
+                logger.error(
+                    "Error in safety_guard (medium risk confirmation)",
+                    extra_fields={"error": str(e)},
+                    exc_info=True,
+                )
                 return {"active_agent": "error"}
 
         # LLM-based Guardrail for general relevance and harmfulness
@@ -380,7 +389,11 @@ If the message is ENTIRELY off-topic (e.g., ONLY about coding, politics, etc.) o
                     "active_agent": "safety_guard",
                 }
         except Exception as e:
-            print(f"Error in safety_guard (general relevance): {e}")
+            logger.error(
+                "Error in safety_guard (general relevance)",
+                extra_fields={"error": str(e)},
+                exc_info=True,
+            )
             return {"active_agent": "error"}
 
         # Safe — pass through to orchestrator (no message added)
@@ -414,11 +427,16 @@ User Message: "{content}"
 
 Priority: If both are needed, put the most relevant one first."""
 
+        logger.info("Entering orchestrator node")
         try:
             decision: OrchestratorDecision = structured_llm.invoke(prompt)
             planned = decision.agents if decision.agents else ["coach"]
         except Exception as e:
-            print(f"Error in orchestrator decision: {e}")
+            logger.error(
+                "Error in orchestrator decision",
+                extra_fields={"error": str(e)},
+                exc_info=True,
+            )
             return {"active_agent": "error"}
 
         return {"planned_agents": planned}
@@ -497,7 +515,9 @@ Priority: If both are needed, put the most relevant one first."""
         try:
             response = await self.llm_with_tools.ainvoke(input_messages)
         except Exception as e:
-            print(f"Error in coach_agent: {e}")
+            logger.error(
+                "Error in coach_agent", extra_fields={"error": str(e)}, exc_info=True
+            )
             return {"active_agent": "error"}
 
         # If calling a tool, keep the agent active and don't remove from plan
@@ -550,7 +570,11 @@ Priority: If both are needed, put the most relevant one first."""
         try:
             response = await self.llm_with_tools.ainvoke(input_messages)
         except Exception as e:
-            print(f"Error in nutrition_agent: {e}")
+            logger.error(
+                "Error in nutrition_agent",
+                extra_fields={"error": str(e)},
+                exc_info=True,
+            )
             return {"active_agent": "error"}
 
         # If calling a tool, keep active
@@ -573,6 +597,7 @@ Priority: If both are needed, put the most relevant one first."""
 
     async def aggregator(self, state: AgentState):
         """Blends outputs from multiple agents into a single cohesive response."""
+        logger.info("Entering aggregator node")
         outputs = state.get("intermediate_outputs", [])
         if not outputs:
             return {
@@ -610,7 +635,9 @@ Priority: If both are needed, put the most relevant one first."""
                 "intermediate_outputs": [],
             }  # Clear intermediate for next turn
         except Exception as e:
-            print(f"Error in aggregator: {e}")
+            logger.error(
+                "Error in aggregator", extra_fields={"error": str(e)}, exc_info=True
+            )
             return {"active_agent": "error"}
 
     def fallback(self, state: AgentState):
@@ -653,15 +680,20 @@ def create_fitness_graph(is_eval: bool = False):
     tools_node = ToolNode(all_tools)
 
     async def safe_tools_node(state: AgentState, config):
+        logger.info("Entering tools node")
         try:
             return await tools_node.ainvoke(state, config)
-        except Exception:
+        except Exception as e:
+            logger.error(
+                "Error in tools node", extra_fields={"error": str(e)}, exc_info=True
+            )
             return {"active_agent": "error"}
 
     # --- Human Review Node (interrupt before destructive actions) ---
     async def human_review(state: AgentState):
         """Intercept destructive tool calls and ask the user for confirmation
         via a LangGraph interrupt.  Non-destructive calls pass through."""
+        logger.info("Entering human_review node")
         last_message = state["messages"][-1]
 
         if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
@@ -742,6 +774,7 @@ def create_fitness_graph(is_eval: bool = False):
 
     # Safety guard routing: if flagged → END, otherwise → orchestrator
     def after_safety_guard(state: AgentState):
+        logger.info("Transitioning from safety_guard")
         if state.get("active_agent") == "error":
             return "fallback"
         if state.get("active_agent") == "safety_guard":
@@ -756,6 +789,7 @@ def create_fitness_graph(is_eval: bool = False):
 
     # Orchestrator decides which specialist agents to invoke
     def sequencer_routing(state: AgentState):
+        logger.info("Transitioning from orchestrator")
         if state.get("active_agent") == "error":
             return "fallback"
         planned = state.get("planned_agents", [])
@@ -767,6 +801,7 @@ def create_fitness_graph(is_eval: bool = False):
 
     # Routing logic after an agent speaks
     def after_agent(state: AgentState):
+        logger.info(f"Transitioning from {state.get('active_agent', 'unknown agent')}")
         if state.get("active_agent") == "error":
             return "fallback"
 

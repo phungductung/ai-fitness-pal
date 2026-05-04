@@ -158,11 +158,15 @@ class SearchLatestFitnessResearchInput(BaseModel):
 
 class QueryFitnessDiaryInput(BaseModel):
     """Input schema for fitness diary queries."""
-    query: str = Field(
-        ...,
-        description="Search / filter query for the diary (e.g. 'last week weight').",
-        min_length=1,
-        max_length=500,
+    limit: Optional[int] = Field(
+        default=10,
+        description="Number of entries to return (max 100).",
+        ge=1,
+        le=100,
+    )
+    order: Optional[str] = Field(
+        default="desc",
+        description="Sort order by date ('asc' or 'desc').",
     )
 
 

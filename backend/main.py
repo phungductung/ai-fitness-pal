@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 # Import our agents and tools (assuming they are in backend/app)
 from app.agents.orchestrator import create_fitness_graph
 from app.utils.mcp_client import get_mcp_client
+from app.utils.logger import logger, thread_id_var
 
 from fastapi.staticfiles import StaticFiles
 
@@ -60,6 +61,7 @@ async def chat_endpoint(request: ChatRequest):
 
     # Resolve or create a thread_id
     thread_id = request.thread_id or str(uuid.uuid4())
+    thread_id_var.set(thread_id)
     config = {
         "configurable": {"thread_id": thread_id},
         "tags": ["chat_endpoint", "fitness_app"],
@@ -111,7 +113,7 @@ async def chat_endpoint(request: ChatRequest):
         # Track the active node to associate tokens with a sender
         current_node = "assistant"
 
-        print(f"[thread={thread_id}] Starting stream for: {request.message[:50]}...")
+        logger.info(f"Starting stream for: {request.message[:50]}...")
 
         try:
             async for event in graph.astream_events(
@@ -126,7 +128,7 @@ async def chat_endpoint(request: ChatRequest):
                 user_facing_nodes = ["aggregator", "safety_guard", "fallback"]
                 if kind == "on_chain_start" and node_name in streamable_nodes:
                     current_node = "assistant"
-                    print(f"Entering agent node: {node_name}")
+                    logger.debug(f"Entering agent node: {node_name}")
                 elif (
                     kind == "on_chain_start"
                     and node_name
@@ -164,7 +166,7 @@ async def chat_endpoint(request: ChatRequest):
                                 }
                             )
                             yield f"event: message\ndata: {data}\n\n"
-                            print(f"Finished agent node: {node_name}")
+                            logger.debug(f"Finished agent node: {node_name}")
 
             # --- After streaming finishes, check for an interrupt ---
             final_state = await graph.aget_state(config)
@@ -189,13 +191,10 @@ async def chat_endpoint(request: ChatRequest):
                     }
                 )
                 yield f"event: interrupt\ndata: {data}\n\n"
-                print(f"[thread={thread_id}] Interrupted — awaiting human approval")
+                logger.info("Interrupted — awaiting human approval")
 
         except Exception as e:
-            print(f"Error in event_generator: {e}")
-            import traceback
-
-            traceback.print_exc()
+            logger.error(f"Error in event_generator: {e}", exc_info=True)
             error_data = json.dumps({"error": str(e)})
             yield f"event: error\ndata: {error_data}\n\n"
 
@@ -208,8 +207,8 @@ async def chat_endpoint(request: ChatRequest):
 
 @app.post("/chat/resume")
 async def resume_chat(request: ResumeRequest):
-    """Resume a paused graph after human-in-the-loop interrupt.
-    The frontend sends this after the user approves or rejects a destructive action."""
+    """Resume a paused graph after human-in-the-loop interrupt."""
+    thread_id_var.set(request.thread_id)
     config = {
         "configurable": {"thread_id": request.thread_id},
         "tags": ["resume_chat", "fitness_app"],
@@ -275,10 +274,7 @@ async def resume_chat(request: ResumeRequest):
                             yield f"event: message\ndata: {data}\n\n"
 
         except Exception as e:
-            print(f"Error in resume_chat: {e}")
-            import traceback
-
-            traceback.print_exc()
+            logger.error(f"Error in resume_chat: {e}", exc_info=True)
             error_data = json.dumps({"error": str(e)})
             yield f"event: error\ndata: {error_data}\n\n"
 
@@ -314,7 +310,7 @@ async def upload_file(file: UploadFile = File(...), type: str = Form(...)):
 @app.get("/morning-briefing")
 async def morning_briefing():
     """Generate a daily morning briefing audio using OpenAI TTS."""
-    print("Received request for morning briefing")
+    logger.info("Received request for morning briefing")
     from app.utils.tts import MorningBriefing
     # from app.utils.mcp_client import get_local_data # Assuming this helper exists (commented out as it doesn't exist yet)
 
@@ -351,9 +347,7 @@ async def get_dashboard_data():
         prs = []
 
     # Get Diary (last 7 entries)
-    diary_json = await client.query_diary(
-        "SELECT * FROM diary ORDER BY date DESC LIMIT 7"
-    )
+    diary_json = await client.query_diary(limit=7, order="desc")
     try:
         diary = json.loads(diary_json) if not diary_json.startswith("Error") else []
         # Sort back to ascending for the chart

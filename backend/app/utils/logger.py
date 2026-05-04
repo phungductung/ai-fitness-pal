@@ -9,6 +9,21 @@ from typing import Any, Dict
 # Context variable to store thread_id for the current request
 thread_id_var: ContextVar[str] = ContextVar("thread_id", default="no_thread")
 
+class CustomLogger(logging.Logger):
+    """Custom logger to support extra_fields keyword argument."""
+    def _log(self, level, msg, args, exc_info=None, extra=None, stack_info=False, stacklevel=1, **kwargs):
+        extra_fields = kwargs.pop("extra_fields", None)
+        if extra_fields:
+            if extra is None:
+                extra = {}
+            # The formatter expects extra_fields to be a direct attribute of the record
+            extra["extra_fields"] = extra_fields
+        
+        super()._log(level, msg, args, exc_info=exc_info, extra=extra, stack_info=stack_info, stacklevel=stacklevel)
+
+# Set the custom logger class before any loggers are created
+logging.setLoggerClass(CustomLogger)
+
 class StructuredFormatter(logging.Formatter):
     """Custom formatter to output JSON logs."""
     def format(self, record: logging.LogRecord) -> str:

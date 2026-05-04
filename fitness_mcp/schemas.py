@@ -48,19 +48,18 @@ class QueryFitnessDiaryMCPInput(BaseModel):
 class AddDiaryEntryMCPInput(BaseModel):
     """Input schema for adding a diary entry via MCP."""
     entry: str = Field(
-        ...,
+        default="Weight update",
         description="Free-text description of the meal or activity.",
-        min_length=1,
         max_length=1000,
     )
     calories: int = Field(
-        ...,
+        default=0,
         description="Calorie count. Must be non-negative.",
         ge=0,
         le=20000,
     )
     protein: int = Field(
-        ...,
+        default=0,
         description="Protein intake in grams. Must be non-negative.",
         ge=0,
         le=2000,

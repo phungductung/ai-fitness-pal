@@ -195,19 +195,18 @@ class AddPersonalRecordInput(BaseModel):
 class AddDiaryEntryInput(BaseModel):
     """Input schema for adding a daily fitness diary entry."""
     entry: str = Field(
-        ...,
+        default="Weight update",
         description="Free-text description of the meal or activity.",
-        min_length=1,
         max_length=1000,
     )
     calories: int = Field(
-        ...,
+        default=0,
         description="Calorie count for this entry. Must be non-negative.",
         ge=0,
         le=20000,
     )
     protein: int = Field(
-        ...,
+        default=0,
         description="Protein intake in grams. Must be non-negative.",
         ge=0,
         le=2000,

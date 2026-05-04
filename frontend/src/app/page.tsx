@@ -9,7 +9,7 @@ export default function Home() {
       {/* Sidebar / Left Navigation (Optional, could add later) */}
       
       {/* Main Dashboard Area */}
-      <div className="flex-1 overflow-y-auto border-r border-white/5">
+      <div className="flex-1 overflow-y-auto border-r border-white/5 custom-scrollbar pr-1">
         <Dashboard />
       </div>
 

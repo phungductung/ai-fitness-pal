@@ -56,7 +56,7 @@ class OrchestratorDecision(BaseModel):
     agents: List[Literal["coach", "nutrition"]] = Field(
         description="Ordered list of specialist agents to invoke. "
         "Put the most relevant agent first. "
-        "Options: 'coach' (training/exercise/recovery) or 'nutrition' (diet/calories/supplements)."
+        "Options: 'coach' (training/exercise/recovery) or 'nutrition' (diet/calories/macros/supplements/body weight)."
     )
 
 
@@ -564,7 +564,8 @@ Priority: If both are needed, put the most relevant one first."""
 
             PRIORITY FOR INFORMATION:
             1. Use 'query_fitness_diary' to find what the user has eaten, their weight history, or other logs.
-            2. Use 'add_diary_entry' to log new meals, calories, and protein intake. (Weight is optional).
+            2. Use 'add_diary_entry' to log new meals, calories, and protein intake, OR just log body weight.
+               - If logging weight only, you don't need to provide 'entry', 'calories', or 'protein' (they will default to 'Weight update' and 0).
             3. Use 'query_knowledge_graph' to get exact connections between Supplements, Goals, Side Effects, etc.
             4. Use 'search_latest_fitness_research' (Tavily) for web searches. """
         )
@@ -724,12 +725,15 @@ def create_fitness_graph(is_eval: bool = False):
         for tc in destructive_calls:
             if tc["name"] == "add_diary_entry":
                 args = tc["args"]
-                descriptions.append(
-                    f'📝 **Log diary entry:** "{args.get("entry", "")}" '
-                    f"({args.get('calories', 0)} kcal, {args.get('protein', 0)}g protein"
-                    + (f", {args.get('weight')} kg" if args.get("weight") else "")
-                    + ")"
-                )
+                if args.get("weight") and not args.get("calories") and not args.get("protein") and (not args.get("entry") or args.get("entry") == "Weight update"):
+                    descriptions.append(f"⚖️ **Log Weight:** {args.get('weight')} kg")
+                else:
+                    descriptions.append(
+                        f'📝 **Log diary entry:** "{args.get("entry", "Weight update")}" '
+                        f"({args.get('calories', 0)} kcal, {args.get('protein', 0)}g protein"
+                        + (f", {args.get('weight')} kg" if args.get("weight") else "")
+                        + ")"
+                    )
             elif tc["name"] == "add_personal_record":
                 args = tc["args"]
                 descriptions.append(

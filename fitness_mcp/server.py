@@ -38,17 +38,27 @@ def get_personal_records() -> str:
         # Join with exercises table to get the exercise name
         response = supabase.table("personal_records").select("id, date, weight, reps, one_rm_estimate, exercises(name)").order("date", desc=True).execute()
         
-        # Map to PascalCase for frontend compatibility
+        # Map to PascalCase for frontend compatibility and remove duplicates
         formatted_data = []
+        seen = set()
         for row in response.data:
-            formatted_data.append({
-                "Id": row.get("id"),
-                "Date": row.get("date"),
-                "Exercise": row.get("exercises", {}).get("name") if row.get("exercises") else "Unknown",
-                "Weight": row.get("weight"),
-                "Reps": row.get("reps"),
-                "1RM_Estimate": row.get("one_rm_estimate")
-            })
+            exercise_name = row.get("exercises", {}).get("name") if row.get("exercises") else "Unknown"
+            date = row.get("date")
+            weight = row.get("weight")
+            
+            # Key for deduplication: same date, same exercise, same PR (weight)
+            key = (date, exercise_name, weight)
+            
+            if key not in seen:
+                formatted_data.append({
+                    "Id": row.get("id"),
+                    "Date": date,
+                    "Exercise": exercise_name,
+                    "Weight": weight,
+                    "Reps": row.get("reps"),
+                    "1RM_Estimate": row.get("one_rm_estimate")
+                })
+                seen.add(key)
         return json.dumps(formatted_data)
     except Exception as e:
         return f"Error fetching PRs from Supabase: {str(e)}"
@@ -145,14 +155,14 @@ def query_fitness_diary(limit: int = 10, order: str = "desc") -> str:
         return f"Error querying diary from Supabase: {str(e)}"
 
 @mcp.tool()
-def add_diary_entry(entry: str, calories: int, protein: int, weight: float | None = None, sleep_hours: float = 8.0, fatigue: int = 3):
+def add_diary_entry(entry: str = "Weight update", calories: int = 0, protein: int = 0, weight: float | None = None, sleep_hours: float = 8.0, fatigue: int = 3):
     """Add a new daily entry to the fitness diary in Supabase.
     Args:
-        entry: Meal/activity description. 1-1000 chars.
-        calories: Calorie count (0-20000).
-        protein: Protein in grams (0-2000).
-        weight: Body weight in kg (20-500, optional).
-        sleep_hours: Hours of sleep (0-24, default 8).
+        entry: Meal/activity description (default 'Weight update').
+        calories: Calorie count (default 0).
+        protein: Protein in grams (default 0).
+        weight: Body weight in kg (optional).
+        sleep_hours: Hours of sleep (default 8).
         fatigue: Fatigue level 1-5 (default 3).
     """
     # --- Pydantic validation ---
@@ -170,33 +180,31 @@ def add_diary_entry(entry: str, calories: int, protein: int, weight: float | Non
     date = datetime.date.today().isoformat()
     
     try:
-        # 1. Update/Insert body metrics (only if weight is provided)
-        if validated.weight is not None:
-            res1 = supabase.table("body_metrics").upsert({
-                "date": date,
-                "weight": validated.weight,
-                "sleep_hours": validated.sleep_hours,
-                "fatigue_level": validated.fatigue
-            }).execute()
-            print(f"Body metrics upserted: {res1.data}", file=sys.stderr)
-        else:
-            res1 = supabase.table("body_metrics").upsert({
-                "date": date,
-                "sleep_hours": validated.sleep_hours,
-                "fatigue_level": validated.fatigue
-            }, on_conflict="date").execute()
-            print(f"Body metrics (no weight) upserted: {res1.data}", file=sys.stderr)
-
-        # 2. Insert nutrition log
-        res2 = supabase.table("nutrition_logs").insert({
+        # 1. Update/Insert body metrics (always update sleep/fatigue, weight if provided)
+        metrics_payload = {
             "date": date,
-            "entry_text": validated.entry,
-            "calories": validated.calories,
-            "protein_g": validated.protein
-        }).execute()
-        print(f"Nutrition log inserted: {res2.data}", file=sys.stderr)
+            "sleep_hours": validated.sleep_hours,
+            "fatigue_level": validated.fatigue
+        }
+        if validated.weight is not None:
+            metrics_payload["weight"] = validated.weight
+            
+        res1 = supabase.table("body_metrics").upsert(metrics_payload, on_conflict="date").execute()
+        print(f"Body metrics upserted: {res1.data}", file=sys.stderr)
 
-        return f"Diary entry added to Supabase for {date}"
+        # 2. Insert nutrition log ONLY if there's actual data or it's not a default weight update
+        # This avoids cluttering the DB with empty nutrition logs when only weight is reported.
+        if validated.calories > 0 or validated.protein > 0 or (validated.entry != "Weight update" and validated.entry != ""):
+            res2 = supabase.table("nutrition_logs").insert({
+                "date": date,
+                "entry_text": validated.entry,
+                "calories": validated.calories,
+                "protein_g": validated.protein
+            }).execute()
+            print(f"Nutrition log inserted: {res2.data}", file=sys.stderr)
+            return f"Diary entry and weight logged to Supabase for {date}"
+        
+        return f"Weight logged to Supabase for {date}"
 
     except Exception as e:
         return f"Error adding diary entry to Supabase: {str(e)}"

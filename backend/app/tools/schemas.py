@@ -214,7 +214,8 @@ class AddDiaryEntryInput(BaseModel):
     )
     weight: Optional[float] = Field(
         default=None,
-        description="Current body weight in kg (optional).",
+        description="Current body weight in kg. This is OPTIONAL and should be omitted unless the user specifically provides their weight. Logging a meal does NOT require weight.",
         ge=20,
         le=500,
     )
+

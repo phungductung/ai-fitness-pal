@@ -111,6 +111,10 @@ export default function Chat() {
   }, []);
 
   useEffect(() => {
+    handleNewChat();
+  }, [handleNewChat]);
+
+  useEffect(() => {
     const handleExternalNewChat = () => handleNewChat();
     window.addEventListener('new-chat', handleExternalNewChat);
     return () => window.removeEventListener('new-chat', handleExternalNewChat);
@@ -206,10 +210,15 @@ export default function Chat() {
                   }
                   return [...prev, { role: 'assistant', content: parsedData.content, sender }];
                 });
+              } else if (event === 'interrupt') {
+                setPendingInterrupt(parsedData);
+                setIsLoading(false);
+                console.log("Subsequent interrupt received:", parsedData);
               }
             } catch (e) {
               console.error("Error parsing resume response:", data, e);
             }
+
           }
         }
       }
@@ -449,12 +458,8 @@ export default function Chat() {
             <Plus size={20} />
           </button>
           <h3 className="font-semibold text-lg">AI Chatbot</h3>
-          {isInitializing ? (
-            <Loader2 size={12} className="animate-spin text-primary ml-1" />
-          ) : threadId && (
-            <span className="text-[9px] text-gray-600 font-mono ml-1 hidden sm:inline" title={`Thread: ${threadId}`}>
-              🔗 {threadId.slice(0, 8)}…
-            </span>
+          {isInitializing && (
+            <Loader2 size={14} className="animate-spin text-primary ml-2" />
           )}
         </div>
         <div className="flex -space-x-2">

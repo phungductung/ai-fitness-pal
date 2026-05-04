@@ -83,3 +83,11 @@ class AddDiaryEntryMCPInput(BaseModel):
         ge=1,
         le=5,
     )
+
+
+class DeletePersonalRecordMCPInput(BaseModel):
+    """Input schema for deleting a personal record via MCP."""
+    record_id: str = Field(
+        ...,
+        description="The unique ID of the personal record to delete (UUID).",
+    )

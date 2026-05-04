@@ -277,7 +277,7 @@ async def add_personal_record(exercise: str, weight: float, reps: int):
 
 @tool(args_schema=AddDiaryEntryInput)
 async def add_diary_entry(
-    entry: str, calories: int, protein: int, weight: float = None
+    entry: str, calories: int, protein: int, weight: float | None = None
 ):
     """Add a new entry to the user's daily fitness diary.
     Use this when the user reports what they ate, their current weight, or wants to log their nutritional intake.
@@ -371,13 +371,13 @@ Respond with exactly one word: MEDICAL or SAFE."""
                 return {"active_agent": "error"}
 
         # LLM-based Guardrail for general relevance and harmfulness
-        guard_prompt = f"""You are a strict input filter for a fitness AI.
-Determine if the user's message contains ANY questions or statements relevant to fitness, nutrition, health, or using this app.
+        guard_prompt = f"""You are an input filter for a fitness AI.
+Determine if the user's message is relevant to fitness, nutrition, health, or is a normal conversational greeting/pleasantry (e.g., "hello", "good morning", "how are you?", "thanks").
 
 User message: "{content}"
 
-If the message contains AT LEAST ONE relevant fitness/health topic (even if it also contains off-topic questions), or is a normal conversational greeting, respond with "PASS".
-If the message is ENTIRELY off-topic (e.g., ONLY about coding, politics, etc.) or is harmful, respond with a polite, one-sentence refusal explaining that you are a fitness assistant.
+If the message is relevant or a normal greeting, respond with "PASS".
+If the message is ENTIRELY off-topic (e.g., about coding, politics, etc.) and NOT a greeting, respond with a polite, one-sentence refusal explaining that you are a fitness assistant.
 """
         try:
             response = await self.llm.ainvoke(guard_prompt)
@@ -500,11 +500,12 @@ Priority: If both are needed, put the most relevant one first."""
             
             Always check the logs with 'get_personal_records' or 'query_fitness_diary' first.
             
-            CRITICAL RULES FOR GROUNDED RESPONSES:
-            - Your response MUST only contain information present in the tool outputs. Do NOT add general advice, tips, or recommendations beyond what the tools returned.
-            - When a tool returns data, report that data directly. Do NOT interpret, extrapolate, or add coaching tips unless the tool output contains them.
-            - When logging a PR, confirm EXACTLY what was logged using the tool's confirmation message. Do NOT rephrase or reinterpret the logged data.
-            - Format with clear Markdown. Be concise and direct; no conversational fluff or encouragement."""
+            CRITICAL RULES:
+            1. **Greetings**: If the user is just saying hello or greeting you, respond with a brief, professional greeting and ask how you can help with their training goals.
+            2. **Grounded Responses**: If the user asks a specific question that requires data (PRs, logs, etc.), your response MUST only contain information present in the tool outputs. Do NOT add general advice beyond what the tools returned.
+            3. **No interpretation**: When a tool returns data, report it directly. Do NOT interpret or extrapolate.
+            4. **Logging Confirmation**: When logging a PR, confirm EXACTLY what was logged using the tool's confirmation message.
+            5. **Formatting**: Format with clear Markdown. Be concise and direct."""
         )
 
         input_messages = [system_msg] + messages
@@ -522,6 +523,7 @@ Priority: If both are needed, put the most relevant one first."""
 
         # If calling a tool, keep the agent active and don't remove from plan
         if response.tool_calls:
+            logger.info("Coach agent calling tools", extra_fields={"tool_calls": [tc["name"] for tc in response.tool_calls]})
             return {
                 "messages": [response],
                 "active_agent": "coach",
@@ -529,14 +531,17 @@ Priority: If both are needed, put the most relevant one first."""
             }
 
         # If it's a final text response, store it for blending and move to next
+        logger.info("Coach agent produced final response", extra_fields={"content": response.content[:100]})
         remaining = planned[1:] if planned and planned[0] == "coach" else planned
         new_output = {"sender": "coach", "content": response.content}
         return {
+            "messages": [response],
             "intermediate_outputs": state.get("intermediate_outputs", [])
             + [new_output],
             "active_agent": "coach",
             "planned_agents": remaining,
         }
+
 
     async def nutrition_agent(self, state: AgentState):
         """Focuses on macros, calories, and supplements."""
@@ -549,20 +554,23 @@ Priority: If both are needed, put the most relevant one first."""
             If the user asked about training, your colleague the Strength Coach will handle that, so do NOT give workout advice yourself. 
             If the user asked ANY completely unrelated questions (e.g., coding, politics), explicitly but politely refuse to answer that specific part.
             
+            CRITICAL RULES:
+            1. **Weight is Optional**: You can log meals, calories, and protein WITHOUT a body weight value. Do NOT ask the user for their weight unless they explicitly mention wanting to log it. If they only report a meal, JUST log the meal.
+            2. **Greetings**: If the user is just saying hello or greeting you, respond with a brief, professional greeting and ask how you can help with their nutrition or supplement goals.
+            3. **Grounded Responses**: If the user asks a specific question that requires data (diary, knowledge graph, etc.), your response MUST only contain information present in the tool outputs. Do NOT add general advice beyond what the tools returned.
+            4. **No Redundancy**: If you see a 'ToolMessage' in the history confirming a successful 'add_diary_entry', do NOT call the tool again for the same data. Instead, provide a final confirmation to the user.
+            5. **No interpretation**: When reporting supplement data or diary data, use ONLY the fields or numbers returned. Do NOT elaborate or add your own interpretation.
+            6. **Formatting**: Format with clear Markdown. Be concise and direct. 
+
             PRIORITY FOR INFORMATION:
             1. Use 'query_fitness_diary' to find what the user has eaten, their weight history, or other logs.
-            2. Use 'add_diary_entry' to log new meals, calories, protein intake, or current body weight.
-            3. Use 'query_knowledge_graph' to get exact connections between Supplements, Goals, Side Effects, Precautions, Synergies, Food Sources, and Medical Contraindications.
-            4. Use 'search_latest_fitness_research' (Tavily) to search the web for any specific scientific studies or unstructured fitness questions not found in the graph.
-            
-            CRITICAL RULES FOR GROUNDED RESPONSES:
-            - Your response MUST only contain information present in the tool outputs. Do NOT add general nutrition advice or explanations beyond what the tools returned.
-            - When reporting supplement data from the knowledge graph, use ONLY the fields returned (name, strength, effect, dosage, side_effects, precautions, food_sources, contraindications). Do NOT elaborate on what these effects mean or add your own interpretation.
-            - When reporting diary data, state the exact numbers from the data. Do NOT add analysis or dietary recommendations unless the tool output contains them.
-            - Format with clear Markdown. Be concise and direct; no conversational fluff or encouragement."""
+            2. Use 'add_diary_entry' to log new meals, calories, and protein intake. (Weight is optional).
+            3. Use 'query_knowledge_graph' to get exact connections between Supplements, Goals, Side Effects, etc.
+            4. Use 'search_latest_fitness_research' (Tavily) for web searches. """
         )
 
         input_messages = [system_msg] + messages
+
         if file_path and os.path.exists(file_path):
             multimodal_content = self._get_multimodal_content(file_path)
             input_messages.append(HumanMessage(content=multimodal_content))
@@ -579,6 +587,7 @@ Priority: If both are needed, put the most relevant one first."""
 
         # If calling a tool, keep active
         if response.tool_calls:
+            logger.info("Nutrition agent calling tools", extra_fields={"tool_calls": [tc["name"] for tc in response.tool_calls]})
             return {
                 "messages": [response],
                 "active_agent": "nutrition",
@@ -586,14 +595,18 @@ Priority: If both are needed, put the most relevant one first."""
             }
 
         # Final text response
+        logger.info("Nutrition agent produced final response", extra_fields={"content": response.content[:100]})
         remaining = planned[1:] if planned and planned[0] == "nutrition" else planned
         new_output = {"sender": "nutrition", "content": response.content}
         return {
+            "messages": [response],
             "intermediate_outputs": state.get("intermediate_outputs", [])
             + [new_output],
             "active_agent": "nutrition",
             "planned_agents": remaining,
         }
+
+
 
     async def aggregator(self, state: AgentState):
         """Blends outputs from multiple agents into a single cohesive response."""
@@ -617,13 +630,13 @@ Priority: If both are needed, put the most relevant one first."""
         {json.dumps(outputs, indent=2)}
         
         Strict Rules for High Faithfulness:
-        1. **Stick to the facts**: Only include information provided by the specialists. Do not add outside knowledge or general advice unless it's explicitly mentioned by them.
-        2. **No conversational filler**: Do NOT use greetings, sign-offs, or transitions like "According to the coach".
-        3. **Concise Refusals**: If a specialist refused an off-topic part of the prompt, include a brief, one-sentence refusal at the end.
-        4. **Markdown Formatting**: Use clear headers and lists.
-        5. **Direct Answer**: Start with the most important information or the answer to the user's primary question.
-        6. **Zero embellishment**: Do NOT add encouragement, motivational phrases (e.g., "Keep up the good work!", "Great job!"), or any text not directly derived from the specialist data above.
-        7. **Traceability**: Every claim or number in your response MUST come from the specialist advice above. If the specialists didn't mention it, do NOT include it.
+        1. **One Voice**: Speak as one unified assistant. Do NOT use headers like "Nutritionist:" or "Coach:".
+        2. **Direct Confirmation**: If a specialist confirmed a task (e.g., meal logged), state it clearly and immediately.
+        3. **No Redundant Questions**: Do NOT ask the user for information they have already provided in the history (e.g., calories, protein, or meal description).
+        4. **Actionable Errors**: If a specialist reported an error, explain it simply. Otherwise, assume success.
+        5. **Concise Refusals**: If a specialist refused an off-topic part of the prompt, include a brief, one-sentence refusal at the end.
+        6. **Markdown Formatting**: Use lists and bold text for structure.
+        7. **Traceability**: Every claim or number in your response MUST come from the specialist advice above.
         """
 
         try:

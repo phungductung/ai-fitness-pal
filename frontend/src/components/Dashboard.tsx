@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Activity, Dumbbell, Utensils, Zap, Calendar, TrendingUp, Loader2, Play, Square, Volume2 } from 'lucide-react';
+import { Activity, Dumbbell, Utensils, Zap, Calendar, TrendingUp, Loader2, Play, Square, Volume2, Trash2 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import LoadingSkeleton from './LoadingSkeleton';
 
@@ -26,27 +26,31 @@ export default function Dashboard() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showAllPRs, setShowAllPRs] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const filteredWeightData = data.weight_progress;
 
+  const fetchDashboardData = async (background = false) => {
+    if (background) setIsRefreshing(true);
+    else setIsLoading(true);
+    
+    try {
+      const response = await fetch('http://localhost:8000/dashboard-data');
+      const json = await response.json();
+      setData(json);
+    } catch (error) {
+      console.error("Failed to fetch dashboard data:", error);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  };
+
   useEffect(() => {
     setIsMounted(true);
-    const fetchDashboardData = async (background = false) => {
-      if (background) setIsRefreshing(true);
-      else setIsLoading(true);
-      
-      try {
-        const response = await fetch('http://localhost:8000/dashboard-data');
-        const json = await response.json();
-        setData(json);
-      } catch (error) {
-        console.error("Failed to fetch dashboard data:", error);
-      } finally {
-        setIsLoading(false);
-        setIsRefreshing(false);
-      }
-    };
     fetchDashboardData();
 
     const handleDataUpdate = () => {
@@ -98,6 +102,26 @@ export default function Dashboard() {
       console.error("Failed to fetch morning briefing:", error);
     } finally {
       setIsBriefingLoading(false);
+    }
+  };
+
+  const handleDeletePR = async (id: string) => {
+    setDeletingId(id);
+    setConfirmId(null);
+    try {
+      const response = await fetch(`http://localhost:8000/personal-records/${id}`, {
+        method: 'DELETE',
+      });
+      const result = await response.json();
+      if (result.status === 'success') {
+        await fetchDashboardData(true);
+      } else {
+        alert("Error: " + result.message);
+      }
+    } catch (error) {
+      console.error("Failed to delete PR:", error);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -213,24 +237,67 @@ export default function Dashboard() {
           <h3 className="text-xl font-semibold mb-6 flex items-center gap-2">
             <Calendar className="text-secondary" /> Recent PRs
           </h3>
-          <div className="space-y-4">
+          <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
             {isLoading ? (
               <div className="flex justify-center items-center h-40">
                 <Loader2 className="animate-spin text-primary" />
               </div>
             ) : data.prs.length > 0 ? (
-              [...data.prs].reverse().slice(0, 4).map((pr: any, index: number) => (
-                <PRItem key={index} exercise={pr.Exercise} weight={`${pr.Weight}kg`} date={pr.Date} />
+              (showAllPRs ? data.prs : data.prs.slice(0, 4)).map((pr: any, index: number) => (
+                <PRItem 
+                  key={index} 
+                  exercise={pr.Exercise} 
+                  weight={`${pr.Weight}kg`} 
+                  date={pr.Date} 
+                  onDelete={() => setConfirmId(pr.Id)}
+                  isDeleting={deletingId === pr.Id}
+                />
               ))
             ) : (
               <p className="text-gray-500 text-center py-10">No PRs found</p>
             )}
           </div>
-          <button className="w-full mt-6 py-2 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition">
-            View All History
-          </button>
+          {data.prs.length > 4 && (
+            <button 
+              onClick={() => setShowAllPRs(!showAllPRs)}
+              className="w-full mt-6 py-2 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition text-sm font-medium"
+            >
+              {showAllPRs ? 'Show Less' : 'View All History'}
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Confirmation Modal */}
+      {confirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="glass max-w-md w-full p-8 border-white/10 shadow-2xl animate-zoom-in">
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 mb-2">
+                <Trash2 size={32} />
+              </div>
+              <h3 className="text-2xl font-bold text-white">Delete Personal Record?</h3>
+              <p className="text-gray-400">
+                Are you sure you want to remove this record? This action cannot be undone.
+              </p>
+              <div className="flex gap-4 w-full pt-4">
+                <button 
+                  onClick={() => setConfirmId(null)}
+                  className="flex-1 py-3 px-4 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition font-medium"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => handleDeletePR(confirmId)}
+                  className="flex-1 py-3 px-4 bg-red-500 text-white rounded-xl hover:bg-red-600 transition font-bold shadow-lg shadow-red-500/20"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -251,14 +318,27 @@ function StatCard({ icon, label, value, unit, sub }) {
   );
 }
 
-function PRItem({ exercise, weight, date }) {
+function PRItem({ exercise, weight, date, onDelete, isDeleting }) {
   return (
-    <div className="flex justify-between items-center p-3 hover:bg-white/5 rounded-lg transition border border-transparent hover:border-white/5">
-      <div>
+    <div className="group flex justify-between items-center p-3 hover:bg-white/5 rounded-lg transition border border-transparent hover:border-white/5">
+      <div className="flex-1">
         <div className="font-medium">{exercise}</div>
         <div className="text-xs text-gray-500">{date}</div>
       </div>
-      <div className="text-primary font-bold">{weight}</div>
+      <div className="flex items-center gap-3">
+        <div className="text-primary font-bold">{weight}</div>
+        <button 
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          disabled={isDeleting}
+          className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded-md transition-all disabled:opacity-50"
+          title="Remove PR"
+        >
+          {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+        </button>
+      </div>
     </div>
   );
 }

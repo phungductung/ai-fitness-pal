@@ -273,6 +273,30 @@ async def resume_chat(request: ResumeRequest):
                             )
                             yield f"event: message\ndata: {data}\n\n"
 
+            # --- After streaming finishes, check for an interrupt ---
+            final_state = await graph.aget_state(config)
+            if final_state.next:  # Graph is paused at an interrupt
+                interrupt_data = None
+                if final_state.tasks:
+                    for task in final_state.tasks:
+                        if hasattr(task, "interrupts") and task.interrupts:
+                            interrupt_data = task.interrupts[0].value
+                            break
+
+                confirmation = interrupt_data or {
+                    "question": "A destructive action is pending. Do you approve?"
+                }
+                data = json.dumps(
+                    {
+                        "type": "interrupt",
+                        "thread_id": request.thread_id,
+                        "question": confirmation.get("question", str(confirmation)),
+                        "tool_calls": confirmation.get("tool_calls", []),
+                    }
+                )
+                yield f"event: interrupt\ndata: {data}\n\n"
+                logger.info("Interrupted again — awaiting human approval")
+
         except Exception as e:
             logger.error(f"Error in resume_chat: {e}", exc_info=True)
             error_data = json.dumps({"error": str(e)})
@@ -392,22 +416,53 @@ async def get_dashboard_data():
             "full_date": date_str
         })
 
-    # Get today's stats
+    # Get today's stats - Sum calories and protein for multiple entries on the same day
     today_stats = {"calories": 0, "protein": 0, "weight": 0, "recovery": 88}
+    
     if diary:
-        latest = diary[-1]  # Now it's the latest because we sorted it ASC
-        today_stats["calories"] = latest.get("calories", 0)
-        today_stats["protein"] = latest.get("protein", 0)
-        today_stats["weight"] = latest.get("weight", 0)
+        # Sum calories and protein for today
+        today_str = today.isoformat()
+        today_entries = [e for e in diary if e.get("date") == today_str]
+        
+        if today_entries:
+            today_stats["calories"] = sum(e.get("calories", 0) for e in today_entries)
+            today_stats["protein"] = sum(e.get("protein", 0) for e in today_entries)
+            
+            # Use the latest weight from today if available
+            weights_today = [e.get("weight") for e in today_entries if e.get("weight") is not None]
+            if weights_today:
+                today_stats["weight"] = weights_today[-1]
+            else:
+                # Fallback to the latest weight available overall
+                all_weights = [e.get("weight") for e in diary if e.get("weight") is not None]
+                if all_weights:
+                    today_stats["weight"] = all_weights[-1]
 
-        # Calculate recovery score
-        sleep = latest.get("sleep_hours", 8.0)
-        fatigue = latest.get("fatigue", 3)
-        # Recovery = (Sleep % of 8 hours) - (Fatigue impact)
-        recovery_score = int((sleep / 8.0) * 100 - (fatigue * 5))
-        today_stats["recovery"] = max(0, min(100, recovery_score))
+            # Calculate recovery score from the latest entry's sleep/fatigue
+            latest = today_entries[-1]
+            sleep = latest.get("sleep_hours", 8.0)
+            fatigue = latest.get("fatigue", 3)
+            recovery_score = int((sleep / 8.0) * 100 - (fatigue * 5))
+            today_stats["recovery"] = max(0, min(100, recovery_score))
+        else:
+            # Fallback for when there are no entries for today
+            all_weights = [e.get("weight") for e in diary if e.get("weight") is not None]
+            if all_weights:
+                today_stats["weight"] = all_weights[-1]
 
     return {"prs": prs, "weight_progress": weight_progress, "today_stats": today_stats}
+
+
+@app.delete("/personal-records/{record_id}")
+async def delete_personal_record(record_id: str):
+    """Delete a personal record."""
+    client = get_mcp_client()
+    result = await client.delete_pr(record_id)
+    
+    if result.startswith("Error") or "No record found" in result:
+        return {"status": "error", "message": result}
+        
+    return {"status": "success", "message": result}
 
 
 # --- Cache Management Endpoints ---

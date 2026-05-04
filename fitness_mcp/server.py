@@ -10,6 +10,7 @@ from schemas import (
     AddPersonalRecordMCPInput,
     QueryFitnessDiaryMCPInput,
     AddDiaryEntryMCPInput,
+    DeletePersonalRecordMCPInput,
 )
 
 # Load environment variables
@@ -35,12 +36,13 @@ def get_personal_records() -> str:
         return "Supabase client not initialized. Check your .env file."
     try:
         # Join with exercises table to get the exercise name
-        response = supabase.table("personal_records").select("date, weight, reps, one_rm_estimate, exercises(name)").order("date", desc=True).execute()
+        response = supabase.table("personal_records").select("id, date, weight, reps, one_rm_estimate, exercises(name)").order("date", desc=True).execute()
         
         # Map to PascalCase for frontend compatibility
         formatted_data = []
         for row in response.data:
             formatted_data.append({
+                "Id": row.get("id"),
                 "Date": row.get("date"),
                 "Exercise": row.get("exercises", {}).get("name") if row.get("exercises") else "Unknown",
                 "Weight": row.get("weight"),
@@ -50,6 +52,28 @@ def get_personal_records() -> str:
         return json.dumps(formatted_data)
     except Exception as e:
         return f"Error fetching PRs from Supabase: {str(e)}"
+
+@mcp.tool()
+def delete_personal_record(record_id: str) -> str:
+    """Delete a specific personal record from Supabase.
+    Args:
+        record_id: The unique ID of the record to delete.
+    """
+    try:
+        validated = DeletePersonalRecordMCPInput(record_id=record_id)
+    except ValidationError as e:
+        return f"Input validation error: {e}"
+
+    if not supabase:
+        return "Supabase client not initialized."
+    
+    try:
+        response = supabase.table("personal_records").delete().eq("id", validated.record_id).execute()
+        if len(response.data) == 0:
+            return f"No record found with ID {validated.record_id}."
+        return f"Successfully deleted personal record with ID {validated.record_id}."
+    except Exception as e:
+        return f"Error deleting PR from Supabase: {str(e)}"
 
 @mcp.tool()
 def add_personal_record(exercise: str, weight: float, reps: int):
@@ -121,7 +145,7 @@ def query_fitness_diary(limit: int = 10, order: str = "desc") -> str:
         return f"Error querying diary from Supabase: {str(e)}"
 
 @mcp.tool()
-def add_diary_entry(entry: str, calories: int, protein: int, weight: float = None, sleep_hours: float = 8.0, fatigue: int = 3):
+def add_diary_entry(entry: str, calories: int, protein: int, weight: float | None = None, sleep_hours: float = 8.0, fatigue: int = 3):
     """Add a new daily entry to the fitness diary in Supabase.
     Args:
         entry: Meal/activity description. 1-1000 chars.
@@ -146,23 +170,34 @@ def add_diary_entry(entry: str, calories: int, protein: int, weight: float = Non
     date = datetime.date.today().isoformat()
     
     try:
-        # 1. Update/Insert body metrics
-        supabase.table("body_metrics").upsert({
-            "date": date,
-            "weight": validated.weight,
-            "sleep_hours": validated.sleep_hours,
-            "fatigue_level": validated.fatigue
-        }).execute()
+        # 1. Update/Insert body metrics (only if weight is provided)
+        if validated.weight is not None:
+            res1 = supabase.table("body_metrics").upsert({
+                "date": date,
+                "weight": validated.weight,
+                "sleep_hours": validated.sleep_hours,
+                "fatigue_level": validated.fatigue
+            }).execute()
+            print(f"Body metrics upserted: {res1.data}", file=sys.stderr)
+        else:
+            res1 = supabase.table("body_metrics").upsert({
+                "date": date,
+                "sleep_hours": validated.sleep_hours,
+                "fatigue_level": validated.fatigue
+            }, on_conflict="date").execute()
+            print(f"Body metrics (no weight) upserted: {res1.data}", file=sys.stderr)
 
         # 2. Insert nutrition log
-        supabase.table("nutrition_logs").insert({
+        res2 = supabase.table("nutrition_logs").insert({
             "date": date,
             "entry_text": validated.entry,
             "calories": validated.calories,
             "protein_g": validated.protein
         }).execute()
+        print(f"Nutrition log inserted: {res2.data}", file=sys.stderr)
 
         return f"Diary entry added to Supabase for {date}"
+
     except Exception as e:
         return f"Error adding diary entry to Supabase: {str(e)}"
 

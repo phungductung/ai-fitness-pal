@@ -66,6 +66,10 @@ class MCPClient:
         """Fetch PRs from the MCP server."""
         return await self.call_tool("get_personal_records")
 
+    async def delete_pr(self, record_id: str):
+        """Delete a PR from the MCP server."""
+        return await self.call_tool("delete_personal_record", {"record_id": record_id})
+
     async def query_diary(self, limit: int = 10, order: str = "desc"):
         """Execute a query on the fitness diary via MCP."""
         return await self.call_tool("query_fitness_diary", {"limit": limit, "order": order})
@@ -74,7 +78,7 @@ class MCPClient:
         """Log a new personal record via MCP."""
         return await self.call_tool("add_personal_record", {"exercise": exercise, "weight": weight, "reps": reps})
 
-    async def add_diary(self, entry: str, calories: int, protein: int, weight: float = None, sleep_hours: float = 8.0, fatigue: int = 3):
+    async def add_diary(self, entry: str, calories: int, protein: int, weight: float | None = None, sleep_hours: float = 8.0, fatigue: int = 3):
         """Log a new diary entry via MCP."""
         return await self.call_tool("add_diary_entry", {
             "entry": entry, 

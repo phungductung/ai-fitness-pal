@@ -1,12 +1,12 @@
 # 🏋️ AI Fitness Pal: Your Personal Health Architect
 
-[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2015-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
+[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![LangGraph](https://img.shields.io/badge/AI-LangGraph-FF6F00?style=for-the-badge&logo=langchain)](https://github.com/langchain-ai/langgraph)
 [![MCP](https://img.shields.io/badge/Protocol-MCP-4285F4?style=for-the-badge&logo=google)](https://modelcontextprotocol.io/)
 [![Neo4j](https://img.shields.io/badge/Graph-Neo4j-008CC1?style=for-the-badge&logo=neo4j)](https://neo4j.com/)
 
-AI Fitness Pal is a personal health and fitness assistant. It leverages multi-agent orchestration, **Model Context Protocol (MCP)** for secure data access, and **Hybrid RAG** (Vector + Knowledge Graph) to provide personalized coaching, nutrition analysis, and real-time health insights.
+AI Fitness Pal is a personal health and fitness assistant. It leverages multi-agent orchestration, **Model Context Protocol (MCP)** for secure data access, and **Hybrid RAG** (Knowledge Graph + Live Research) to provide personalized coaching, nutrition analysis, and real-time health insights.
 
 ---
 
@@ -19,7 +19,7 @@ flowchart TB
     %% ── External ──────────────────────────────────────────────
     User(["\ud83e\uddd1 User"])
 
-    subgraph Frontend ["<b>\ud83d\udcbb Frontend  &mdash;  Next.js 15 + TypeScript</b>"]
+    subgraph Frontend ["<b>\ud83d\udcbb Frontend  &mdash;  Next.js 16 + TypeScript</b>"]
         direction LR
         Chat["\ud83d\udcac Chat UI<br/><i>(Streaming SSE)</i>"]
         Dashboard["\ud83d\udcca Dashboard<br/><i>(Charts & KPIs)</i>"]
@@ -30,7 +30,7 @@ flowchart TB
     subgraph Backend ["<b>\u2699\ufe0f Backend  &mdash;  FastAPI</b>"]
         direction TB
         API["\ud83d\udd0c REST + SSE API<br/>/chat &bull; /dashboard-data"]
-        Cache["\ud83c\udfb0 Semantic Cache<br/><i>(SQLite)</i>"]
+        Cache["\ud83d\uddb2\ufe0f Exact Cache<br/><i>(SQLite)</i>"]
         Tracing["\ud83d\udcc8 LangSmith<br/><i>(Observability)</i>"]
     end
 
@@ -66,7 +66,7 @@ flowchart TB
 
         subgraph RAG ["Hybrid RAG"]
             direction LR
-            VectorRAG["\ud83d\udd0d Vector RAG<br/><i>ChromaDB</i>"]
+            Research["\ud83d\udd0d Live Research<br/><i>Tavily API</i>"]
             GraphRAG["\ud83c\udf10 Knowledge Graph<br/><i>Neo4j AuraDB</i>"]
         end
     end
@@ -105,9 +105,8 @@ flowchart TB
 
     ToolNode <-->|"data ops"| MCPServer
     MCPServer <--> Supabase
-    ToolNode <--> VectorRAG
+    ToolNode <--> Research
     ToolNode <--> GraphRAG
-    ToolNode <--> Tavily
     API <--> OpenAI
 
     %% ── Styles ─────────────────────────────────────────────────
@@ -122,17 +121,17 @@ flowchart TB
     class Coach,Nutrition agent
     class Orchestrator orch
     class ToolNode,Aggregator tool
-    class MCPServer,Supabase,VectorRAG,GraphRAG data
+    class MCPServer,Supabase,Research,GraphRAG data
     class OpenAI,Tavily ext
 ```
 
 ### System Flow
 
-1.  **User Interaction**: Premium Next.js 15 interface with streaming chat (SSE), dynamic charts, and TTS briefings.
+1.  **User Interaction**: Premium Next.js 16 interface with streaming chat (SSE), dynamic charts, and TTS briefings.
 2.  **Safety First**: The **Safety/Medical Guard** screens all inputs to intercept medical emergencies or unsafe requests, providing compassionate redirects.
 3.  **Agentic Orchestration**: **LangGraph** coordinates specialized **Coach** and **Nutrition** agents. It uses persistent checkpointers to maintain conversation state.
 4.  **Human-in-the-Loop**: Destructive data operations (like deleting logs or significant PR updates) trigger an **interrupt**, requiring explicit user approval before execution.
-5.  **Smart Caching & Tracing**: **Semantic Caching** reduces LLM latency and costs, while **LangSmith** provides production-grade observability.
+5.  **Smart Caching & Tracing**: **Fast SQLite Caching** reduces LLM latency and costs for repeated queries. **LangSmith** provides production-grade observability.
 6.  **Data Sovereignty (MCP)**: Data access is abstracted through a **Model Context Protocol** server, ensuring secure and standardized communication with the **Supabase** backend.
 
 ---
@@ -141,8 +140,8 @@ flowchart TB
 
 -   **🤖 Multi-Agent Orchestration**: Specialized agents collaborate to solve complex queries. Coordinated by a central orchestrator via LangGraph.
 -   **🛡️ Safety/Medical Guard**: Pre-routing agent that detects medical emergencies and mental health crises—gracefully declining with professional resources.
--   **🔍 Hybrid RAG Strategy**: Combines **Vector Search** (ChromaDB) for semantic retrieval with a **Neo4j Knowledge Graph** for complex relationship mapping (e.g., supplement interactions).
--   **⚡ Semantic Caching**: Powered by SQLite, caching LLM responses based on semantic similarity to minimize latency and API costs.
+-   **🔍 Hybrid RAG Strategy**: Combines **Live Internet Research** (Tavily) for the latest trends with a **Neo4j Knowledge Graph** for complex relationship mapping (e.g., supplement interactions).
+-   **⚡ Fast Caching**: Powered by SQLite, caching exact LLM responses to minimize latency and API costs for frequent requests.
 -   **🕵️ Production Observability**: Integrated with **LangSmith** for deep-dive tracing, debugging, and performance monitoring.
 -   **🤝 Human-in-the-Loop**: Safe execution of tools via LangGraph interrupts, ensuring users always have the final say on data-destructive actions.
 -   **📊 Dynamic Dashboard**: Real-time visualization of fitness data fetched directly from Supabase via MCP.
@@ -156,7 +155,7 @@ flowchart TB
 
 -   **Python**: 3.10+
 -   **Node.js**: 18+
--   **Databases**: Supabase (PostgreSQL), Neo4j AuraDB (Graph), ChromaDB (Local Vector).
+-   **Databases**: Supabase (PostgreSQL), Neo4j AuraDB (Graph).
 -   **API Keys**: OpenAI, Tavily, LangSmith.
 
 ### 1. Database & Environment Setup
@@ -203,10 +202,10 @@ npm run dev
 
 ## 🛠️ Tech Stack
 
--   **Frontend**: Next.js 15 (App Router), TypeScript, Tailwind CSS, Framer Motion.
+-   **Frontend**: Next.js 16 (App Router), TypeScript, Tailwind CSS, Framer Motion.
 -   **AI Framework**: LangChain, LangGraph, LangSmith.
 -   **Models**: OpenAI GPT-4o, TTS-1.
--   **Databases**: Supabase (Postgres), Neo4j (Graph), ChromaDB (Vector).
+-   **Databases**: Supabase (Postgres), Neo4j (Graph).
 -   **Protocols**: Model Context Protocol (MCP), SSE (Streaming).
 -   **Validation**: Pydantic v2 (Strict Tool Validation).
 

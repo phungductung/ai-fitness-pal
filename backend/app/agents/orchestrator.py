@@ -46,7 +46,7 @@ _cache_dir = os.path.join(os.path.dirname(__file__), "..", "..", ".cache")
 os.makedirs(_cache_dir, exist_ok=True)
 _cache_db = os.path.join(_cache_dir, "llm_cache.db")
 set_llm_cache(SQLiteCache(database_path=_cache_db))
-logger.info(f"SQLite semantic cache enabled at {_cache_db}")
+logger.info(f"SQLite cache enabled at {_cache_db}")
 
 
 # --- Structured Output Model for Orchestrator Routing ---
@@ -744,7 +744,7 @@ def create_fitness_graph(is_eval: bool = False):
         summary = "\n".join(descriptions)
         confirmation_msg = (
             f"I'm about to make the following changes:\n\n{summary}\n\n"
-            "**Do you approve?** Reply `yes` to confirm or `no` to cancel."
+            "**Do you approve?** Reply `Approve` to confirm or `Reject` to cancel."
         )
 
         # Interrupt execution — the graph pauses here until the user resumes

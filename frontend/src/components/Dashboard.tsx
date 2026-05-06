@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Activity, Dumbbell, Utensils, Zap, Calendar, TrendingUp, Loader2, Play, Square, Volume2, Trash2 } from 'lucide-react';
+import { Activity, Dumbbell, Utensils, Zap, Calendar, TrendingUp, Loader2, Play, Square, Volume2, Trash2, X } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import LoadingSkeleton from './LoadingSkeleton';
 
@@ -29,6 +29,7 @@ export default function Dashboard() {
   const [showAllPRs, setShowAllPRs] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [selectedWorkoutDay, setSelectedWorkoutDay] = useState<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const filteredWeightData = data.weight_progress;
@@ -190,13 +191,7 @@ export default function Dashboard() {
           unit="kg" 
           sub="Latest entry" 
         />
-        <StatCard 
-          icon={<Activity className="text-green-500" />} 
-          label="Recovery" 
-          value={isLoading ? "..." : (data.today_stats.recovery ?? 88).toString()} 
-          unit="%" 
-          sub={data.today_stats.recovery > 70 ? "Ready to train" : "Take it easy"} 
-        />
+        <WorkoutScheduleCard />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -298,9 +293,162 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Workout Exercises Modal */}
+      {selectedWorkoutDay && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setSelectedWorkoutDay(null)}>
+          <div className="glass max-w-md w-full p-8 border-white/10 shadow-2xl animate-zoom-in" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="text-2xl font-bold text-white">{selectedWorkoutDay.focus}</h3>
+                <p className="text-primary font-medium">{selectedWorkoutDay.day}</p>
+              </div>
+              <button 
+                onClick={() => setSelectedWorkoutDay(null)}
+                className="p-2 hover:bg-white/5 rounded-full transition"
+              >
+                <X size={24} className="text-gray-400" /> 
+              </button>
+            </div>
+            
+            <div className="space-y-3">
+              {selectedWorkoutDay.exercises.map((exercise: string, i: number) => (
+                <div key={i} className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-white/5 hover:border-primary/30 transition-colors group">
+                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-xs group-hover:bg-primary group-hover:text-black transition-colors">
+                    {i + 1}
+                  </div>
+                  <span className="text-gray-200 font-medium">{exercise}</span>
+                </div>
+              ))}
+            </div>
+
+            <button 
+              onClick={() => setSelectedWorkoutDay(null)}
+              className="w-full mt-8 py-3 bg-primary text-black font-bold rounded-xl hover:bg-primary/90 transition shadow-lg shadow-primary/20"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
+
+  function WorkoutScheduleCard() {
+    const [showFullSchedule, setShowFullSchedule] = useState(false);
+    
+    // Get current day (0=Sunday, 1=Monday, etc.)
+    const todayIndex = new Date().getDay();
+    // Map to our schedule index (Thứ 2 is index 0)
+    const scheduleIndex = todayIndex === 0 ? 6 : todayIndex - 1;
+    const todayWorkout = WORKOUT_SCHEDULE[scheduleIndex];
+  
+    return (
+      <div className="glass p-6 relative overflow-hidden group">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center space-x-3">
+            <Dumbbell className="text-green-500" />
+            <span className="text-gray-400 font-medium">Daily Workout</span>
+          </div>
+          <div className="px-2 py-0.5 rounded-full bg-green-500/10 border border-green-500/20 text-[10px] text-green-500 font-bold uppercase tracking-wider">
+            Live
+          </div>
+        </div>
+        
+        <div className="flex flex-col">
+          <span className="text-2xl font-bold text-white mb-1">{todayWorkout.focus}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-primary font-medium text-sm">{todayWorkout.day}</span>
+            <span className="w-1 h-1 rounded-full bg-gray-600"></span>
+            <span className="text-gray-500 text-xs uppercase tracking-tighter">Current Plan</span>
+          </div>
+        </div>
+  
+        <div className="mt-6 flex gap-2">
+          <button 
+            onClick={() => setSelectedWorkoutDay(todayWorkout)}
+            className="flex-1 py-2.5 bg-primary/10 hover:bg-primary text-primary hover:text-black border border-primary/20 rounded-xl text-xs font-bold transition-all duration-300 flex items-center justify-center gap-2"
+          >
+            <Activity size={14} />
+            Exercises
+          </button>
+          <button 
+            onClick={() => setShowFullSchedule(true)}
+            className="p-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-colors group/btn"
+            title="Full Week Schedule"
+          >
+            <Calendar size={18} className="text-gray-400 group-hover/btn:text-white transition-colors" />
+          </button>
+        </div>
+  
+        {/* Full Week Schedule Modal */}
+        {showFullSchedule && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in" onClick={() => setShowFullSchedule(false)}>
+            <div className="glass max-w-lg w-full p-8 border-white/10 shadow-2xl animate-zoom-in" onClick={e => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-8">
+                <h3 className="text-3xl font-bold gradient-text">Weekly Schedule</h3>
+                <button 
+                  onClick={() => setShowFullSchedule(false)}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                >
+                  <X size={24} className="text-gray-400" />
+                </button>
+              </div>
+  
+              <div className="grid gap-3">
+                {WORKOUT_SCHEDULE.map((item, idx) => {
+                  const isToday = idx === scheduleIndex;
+                  return (
+                    <div 
+                      key={idx} 
+                      className={`flex items-center justify-between p-4 rounded-2xl border transition-all duration-500 ${
+                        isToday 
+                          ? 'bg-primary/10 border-primary shadow-[0_0_20px_rgba(0,212,255,0.1)]' 
+                          : 'bg-white/5 border-white/5 hover:border-white/10'
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold ${
+                          isToday ? 'bg-primary text-black' : 'bg-white/5 text-gray-400'
+                        }`}>
+                          {item.day.split(' ')[1] || 'CN'}
+                        </div>
+                        <div>
+                          <div className={`font-bold ${isToday ? 'text-primary' : 'text-white'}`}>
+                            {item.focus}
+                          </div>
+                          <div className="text-xs text-gray-500 font-medium uppercase tracking-widest">{item.day}</div>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => setSelectedWorkoutDay(item)}
+                        className={`p-2 rounded-lg transition-colors ${
+                          isToday ? 'bg-primary/20 text-primary hover:bg-primary hover:text-black' : 'bg-white/5 text-gray-500 hover:bg-white/10 hover:text-white'
+                        }`}
+                      >
+                        <Activity size={18} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 }
+
+const WORKOUT_SCHEDULE = [
+  { day: "Monday", focus: "Legs Focus", exercises: ["Squats", "Leg Press", "Lunges", "Leg Extensions", "Leg Curls", "Calf Raises"] },
+  { day: "Tuesday", focus: "Chest Focus", exercises: ["Bench Press", "Incline Dumbbell Press", "Chest Flyes", "Pushups", "Dips"] },
+  { day: "Wednesday", focus: "Back Focus", exercises: ["Pull-ups", "Lat Pulldowns", "Bent-over Rows", "Seated Cable Rows", "Deadlifts"] },
+  { day: "Thursday", focus: "Legs Focus", exercises: ["Squats", "Leg Press", "Lunges", "Leg Extensions", "Leg Curls", "Calf Raises"] },
+  { day: "Friday", focus: "Shoulders Focus", exercises: ["Overhead Press", "Lateral Raises", "Front Raises", "Reverse Flyes", "Shrugs"] },
+  { day: "Saturday", focus: "Cardio", exercises: ["Running (30 mins)", "Cycling (20 mins)", "HIIT (15 mins)"] },
+  { day: "Sunday", focus: "Activate Rest", exercises: ["Light Stretching", "Yoga", "Long Walk (45 mins)"] },
+];
 
 function StatCard({ icon, label, value, unit, sub }) {
   return (

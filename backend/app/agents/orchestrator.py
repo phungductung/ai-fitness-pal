@@ -176,32 +176,34 @@ def suggest_macros(tdee: float, goal: str):
 
 
 @tool(args_schema=VisualizeProgressInput)
-def visualize_progress(exercise: str):
+async def visualize_progress(exercise: str):
     """Generates a progress chart for a specific exercise and returns the file path."""
     from app.tools.visualization import generate_progress_chart
-    import pandas as pd
+    
+    mcp = get_mcp_client(thread_id=thread_id_var.get())
+    prs_json = await mcp.get_prs()
+    
+    try:
+        data = json.loads(prs_json)
+        if not isinstance(data, list):
+             return f"No PR data available to chart for {exercise}."
+    except Exception as e:
+        return f"Error fetching PR data: {str(e)}"
 
-    # Using the correct path relative to the backend directory
-    csv_path = "../fitness_mcp/data/prs.csv"
     output_filename = f"static/{exercise.lower().replace(' ', '_')}_progress.png"
-    result = generate_progress_chart(csv_path, exercise, output_path=output_filename)
+    result = generate_progress_chart(data, exercise, output_path=output_filename)
 
     if "successfully" in result:
-        # Include actual data points in the context so the LLM response can be grounded
-        try:
-            df = pd.read_csv(csv_path)
-            ex_data = df[df["Exercise"].str.lower() == exercise.lower()]
-            if not ex_data.empty:
-                records = ex_data.tail(5).to_dict(orient="records")
-                data_summary = json.dumps(records)
-                return (
-                    f"Chart generated for {exercise}. "
-                    f"![Progress](http://localhost:8000/{output_filename}). "
-                    f"Recent data points: {data_summary}"
-                )
-        except Exception:
-            pass
-        return f"Chart generated successfully for {exercise}. ![Progress](http://localhost:8000/{output_filename})"
+        # Include recent data points so the assistant can talk about the trend
+        exercise_data = [d for d in data if d.get("Exercise", "").lower() == exercise.lower()]
+        recent_data = sorted(exercise_data, key=lambda x: x.get("Date", ""))[-5:]
+        data_summary = json.dumps(recent_data)
+        
+        return (
+            f"Chart generated successfully for {exercise}. "
+            f"![Progress](http://localhost:8000/{output_filename})\n"
+            f"Recent data points: {data_summary}"
+        )
     return result
 
 
@@ -495,10 +497,10 @@ Priority: If both are needed, put the most relevant one first."""
             1. 'get_personal_records': Use this to find the user's lift history and PRs.
             2. 'add_personal_record': Use this to log a NEW record if the user reports a lift.
             3. 'query_fitness_diary': Use this to check the user's weight history or calorie intake.
-            4. 'visualize_progress': Use this to generate charts.
+            4. 'visualize_progress': Use this IMMEDIATELY whenever the user asks for a chart, graph, or visual representation of their progress.
             5. 'search_latest_fitness_research': Use this to find performance studies.
             
-            Always check the logs with 'get_personal_records' or 'query_fitness_diary' first.
+            Always check the logs with 'get_personal_records' or 'query_fitness_diary' first to see if data exists, then use 'visualize_progress' if a chart is requested.
             
             CRITICAL RULES:
             1. **Greetings**: If the user is just saying hello or greeting you, respond with a brief, professional greeting and ask how you can help with their training goals.
@@ -638,6 +640,7 @@ Priority: If both are needed, put the most relevant one first."""
         5. **Concise Refusals**: If a specialist refused an off-topic part of the prompt, include a brief, one-sentence refusal at the end.
         6. **Markdown Formatting**: Use lists and bold text for structure.
         7. **Traceability**: Every claim or number in your response MUST come from the specialist advice above.
+        8. **Preserve Visuals**: If the specialist advice contains a Markdown image link (e.g., `![Progress](...)`), you MUST include it in your final response.
         """
 
         try:

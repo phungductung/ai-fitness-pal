@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Paperclip, Loader2, Plus, ShieldCheck, ShieldX, WifiOff, Zap } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { createPortal } from 'react-dom';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -49,9 +50,15 @@ export default function Chat() {
   const [pendingInterrupt, setPendingInterrupt] = useState<InterruptData | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [streamMetrics, setStreamMetrics] = useState<StreamMetrics | null>(null);
+  const [mounted, setMounted] = useState(false);
+  
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -446,8 +453,37 @@ export default function Chat() {
     }
   };
 
+  const renderModal = () => {
+    if (!previewImage || !mounted) return null;
+
+    return createPortal(
+      <div 
+        className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 md:p-12 animate-fade-in"
+        onClick={() => setPreviewImage(null)}
+      >
+        <button 
+          className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all hover:scale-110 z-[10000]"
+          onClick={() => setPreviewImage(null)}
+        >
+          <Plus size={32} className="rotate-45" />
+        </button>
+        <div className="relative w-full h-full flex items-center justify-center animate-zoom-in" onClick={e => e.stopPropagation()}>
+          <img 
+            src={previewImage} 
+            alt="Preview" 
+            className="max-w-full max-h-full object-contain rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/10"
+          />
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-black/50 backdrop-blur-sm rounded-full border border-white/10 text-white/70 text-xs font-medium">
+            Click anywhere outside to close
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  };
+
   return (
-    <div className="flex flex-col h-full glass">
+    <div className="flex flex-col h-full glass relative">
       <div className="p-4 border-b border-white/10 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <button 
@@ -650,27 +686,7 @@ export default function Chat() {
           )}
         </div>
       </div>
-
-      {/* Image Preview Modal */}
-      {previewImage && (
-        <div 
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-fade-in"
-          onClick={() => setPreviewImage(null)}
-        >
-          <button 
-            className="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
-            onClick={() => setPreviewImage(null)}
-          >
-            <Plus size={24} className="rotate-45" />
-          </button>
-          <img 
-            src={previewImage} 
-            alt="Preview" 
-            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl animate-zoom-in"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      )}
+      {renderModal()}
     </div>
   );
 }

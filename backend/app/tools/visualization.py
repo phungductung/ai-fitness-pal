@@ -4,14 +4,20 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import os
 
-def generate_progress_chart(data_csv: str, exercise: str, output_path: str = "progress_chart.png"):
+def generate_progress_chart(data: str | list, exercise: str, output_path: str = "progress_chart.png"):
     """
-    Generate a progress chart for a specific exercise from the CSV data.
+    Generate a progress chart for a specific exercise from the CSV data or a list of records.
     """
-    if not os.path.exists(data_csv):
-        return "Data file not found."
+    if isinstance(data, str):
+        if not os.path.exists(data):
+            return "Data file not found."
+        df = pd.read_csv(data)
+    else:
+        df = pd.DataFrame(data)
     
-    df = pd.read_csv(data_csv)
+    if df.empty:
+        return "No data provided."
+
     df['Date'] = pd.to_datetime(df['Date'])
     
     # Filter for the specific exercise
@@ -37,6 +43,9 @@ def generate_progress_chart(data_csv: str, exercise: str, output_path: str = "pr
     
     plt.xticks(rotation=45)
     plt.tight_layout()
+    
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
     plt.savefig(output_path)
     plt.close(fig)

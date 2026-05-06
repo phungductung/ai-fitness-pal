@@ -161,7 +161,14 @@ def calculate_tdee(
     gender: str,
     activity_multiplier: float,
 ):
-    """Calculate Total Daily Energy Expenditure. Multiplier: 1.2 (sedentary) to 1.9 (extra active)."""
+    """Calculate Total Daily Energy Expenditure (TDEE). 
+    Activity multipliers: 
+    - 1.2: Sedentary (little or no exercise)
+    - 1.375: Light activity (1-3 days/week)
+    - 1.55: Moderate activity (3-5 days/week)
+    - 1.725: Active (6-7 days/week)
+    - 1.9: Extra active (very hard exercise/physical job)
+    """
     from app.tools.fitness_formulas import calculate_tdee as _calc_tdee
 
     return _calc_tdee(weight_kg, height_cm, age, gender, activity_multiplier)
@@ -499,6 +506,8 @@ Priority: If both are needed, put the most relevant one first."""
             3. 'query_fitness_diary': Use this to check the user's weight history or calorie intake.
             4. 'visualize_progress': Use this IMMEDIATELY whenever the user asks for a chart, graph, or visual representation of their progress.
             5. 'search_latest_fitness_research': Use this to find performance studies.
+            6. 'calculate_tdee': Use this when the user asks for their TDEE. Infer the activity multiplier from their description (e.g., "4 days a week" -> 1.55).
+            7. 'suggest_macros': Use this if the user asks for macro targets.
             
             Always check the logs with 'get_personal_records' or 'query_fitness_diary' first to see if data exists, then use 'visualize_progress' if a chart is requested.
             
@@ -569,7 +578,9 @@ Priority: If both are needed, put the most relevant one first."""
             2. Use 'add_diary_entry' to log new meals, calories, and protein intake, OR just log body weight.
                - If logging weight only, you don't need to provide 'entry', 'calories', or 'protein' (they will default to 'Weight update' and 0).
             3. Use 'query_knowledge_graph' to get exact connections between Supplements, Goals, Side Effects, etc.
-            4. Use 'search_latest_fitness_research' (Tavily) for web searches. """
+            4. Use 'search_latest_fitness_research' (Tavily) for web searches. 
+            5. Use 'calculate_tdee' when the user asks for their TDEE or maintenance calories. You MUST infer the activity multiplier from their description (e.g., "4 days a week" -> 1.55).
+            6. Use 'suggest_macros' after calculating TDEE if the user asks for macro targets or has a specific goal (bulk/cut/maintain). """
         )
 
         input_messages = [system_msg] + messages

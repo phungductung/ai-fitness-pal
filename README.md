@@ -17,64 +17,64 @@ The system is built on a modular, agentic architecture designed for privacy, saf
 ```mermaid
 flowchart TB
     %% ── External ──────────────────────────────────────────────
-    User(["\ud83e\uddd1 User"])
+    User(["🧑 User"])
 
-    subgraph Frontend ["<b>\ud83d\udcbb Frontend  &mdash;  Next.js 16 + TypeScript</b>"]
+    subgraph Frontend ["<b>💻 Frontend  &mdash;  Next.js 16 + TypeScript</b>"]
         direction LR
-        Chat["\ud83d\udcac Chat UI<br/><i>(Streaming SSE)</i>"]
-        Dashboard["\ud83d\udcca Dashboard<br/><i>(Charts & KPIs)</i>"]
-        Upload["\ud83d\udcf7 File Upload<br/><i>(Meals / PDFs)</i>"]
-        Briefing["\ud83c\udf05 Morning Briefing<br/><i>(TTS Audio)</i>"]
+        Chat["💬 Chat UI<br/><i>(Streaming SSE)</i>"]
+        Dashboard["📊 Dashboard<br/><i>(Charts & KPIs)</i>"]
+        Upload["📷 File Upload<br/><i>(Meals / PDFs)</i>"]
+        Briefing["🌅 Morning Briefing<br/><i>(TTS Audio)</i>"]
     end
 
-    subgraph Backend ["<b>\u2699\ufe0f Backend  &mdash;  FastAPI</b>"]
+    subgraph Backend ["<b>⚙️ Backend  &mdash;  FastAPI</b>"]
         direction TB
-        API["\ud83d\udd0c REST + SSE API<br/>/chat &bull; /dashboard-data"]
-        Cache["\ud83d\uddb2\ufe0f Exact Cache<br/><i>(SQLite)</i>"]
-        Tracing["\ud83d\udcc8 LangSmith<br/><i>(Observability)</i>"]
+        API["🔌 REST + SSE API<br/>/chat &bull; /dashboard-data"]
+        Cache["🗄️ Exact Cache<br/><i>(SQLite)</i>"]
+        Tracing["📈 LangSmith<br/><i>(Observability)</i>"]
     end
 
-    subgraph LangGraph ["<b>\ud83e\udde0 AI Core  &mdash;  LangGraph Orchestrator</b>"]
+    subgraph LangGraph ["<b>🧠 AI Core  &mdash;  LangGraph Orchestrator</b>"]
         direction TB
 
-        SafetyGuard{{"\ud83d\udee1\ufe0f Safety / Medical<br/>Guard Agent"}}
+        SafetyGuard{{"🛡️ Safety / Medical<br/>Guard Agent"}}
 
-        Orchestrator{"\ud83c\udfaf Orchestrator<br/><i>(Planner & Router)</i>"}
+        Orchestrator{"🎯 Orchestrator<br/><i>(Planner & Router)</i>"}
 
         subgraph Specialists ["Specialist Agents"]
             direction LR
-            Coach["\ud83c\udfcb\ufe0f Coach Agent<br/><i>Training &bull; PRs &bull; Recovery</i>"]
-            Nutrition["\ud83e\udd57 Nutrition Agent<br/><i>Diet &bull; Macros &bull; Supplements</i>"]
+            Coach["🏋️ Coach Agent<br/><i>Training &bull; PRs &bull; Recovery</i>"]
+            Nutrition["🥗 Nutrition Agent<br/><i>Diet &bull; Macros &bull; Supplements</i>"]
         end
 
-        ToolNode["\ud83d\udee0\ufe0f Tool Executor<br/><i>(Human-in-the-loop)</i>"]
-        Aggregator["\ud83d\udd00 Aggregator<br/><i>Blends multi-agent output</i>"]
+        ToolNode["🛠️ Tool Executor<br/><i>(Human-in-the-loop)</i>"]
+        Aggregator["🔀 Aggregator<br/><i>Blends multi-agent output</i>"]
     end
 
-    subgraph DataLayer ["<b>\ud83d\uddc4\ufe0f Data Layer</b>"]
+    subgraph DataLayer ["<b>📂 Data Layer</b>"]
         direction TB
 
         subgraph MCP ["MCP Server  <i>(Model Context Protocol)</i>"]
             direction LR
-            MCPServer["\ud83d\udd10 MCP Server<br/><i>Supabase Bridge</i>"]
+            MCPServer["🔐 MCP Server<br/><i>Supabase Bridge</i>"]
         end
 
         subgraph Storage ["Cloud Storage"]
             direction LR
-            Supabase[("\ud83d\udc18 Supabase<br/>PostgreSQL")]
+            Supabase[("🐘 Supabase<br/>PostgreSQL")]
         end
 
         subgraph RAG ["Hybrid RAG"]
             direction LR
-            Research["\ud83d\udd0d Live Research<br/><i>Tavily API</i>"]
-            GraphRAG["\ud83c\udf10 Knowledge Graph<br/><i>Neo4j AuraDB</i>"]
+            Research["🔍 Live Research<br/><i>Tavily API</i>"]
+            GraphRAG["🌐 Knowledge Graph<br/><i>Neo4j AuraDB</i>"]
         end
     end
 
-    subgraph External ["<b>\ud83c\udf0d External Services</b>"]
+    subgraph External ["<b>🌍 External Services</b>"]
         direction LR
-        OpenAI["\ud83e\udde0 OpenAI<br/>GPT-4o &bull; TTS"]
-        Tavily["\ud83d\udd0e Tavily<br/>Live Research"]
+        OpenAI["🧠 OpenAI<br/>GPT-4o &bull; TTS"]
+        Tavily["🔎 Tavily<br/>Live Research"]
     end
 
     %% ── Connections ────────────────────────────────────────────
@@ -86,8 +86,8 @@ flowchart TB
     API --> Tracing
     API -->|"invoke graph"| SafetyGuard
 
-    SafetyGuard -->|"\u274c Flagged"| User
-    SafetyGuard -->|"\u2705 Safe"| Orchestrator
+    SafetyGuard -->|"❌ Flagged"| User
+    SafetyGuard -->|"✅ Safe"| Orchestrator
 
     Orchestrator -->|"plan agents"| Coach
     Orchestrator -->|"plan agents"| Nutrition

@@ -19,7 +19,7 @@ flowchart TB
     %% ── External ──────────────────────────────────────────────
     User(["🧑 User"])
 
-    subgraph Frontend ["<b>💻 Frontend  &mdash;  Next.js 16 + TypeScript</b>"]
+    subgraph Frontend ["<b>💻 Frontend - Next.js 16 + TypeScript</b>"]
         direction LR
         Chat["💬 Chat UI<br/><i>(Streaming SSE)</i>"]
         Dashboard["📊 Dashboard<br/><i>(Charts & KPIs)</i>"]
@@ -27,14 +27,14 @@ flowchart TB
         Briefing["🌅 Morning Briefing<br/><i>(TTS Audio)</i>"]
     end
 
-    subgraph Backend ["<b>⚙️ Backend  &mdash;  FastAPI</b>"]
+    subgraph Backend ["<b>⚙️ Backend - FastAPI</b>"]
         direction TB
-        API["🔌 REST + SSE API<br/>/chat &bull; /dashboard-data"]
+        API["🔌 REST + SSE API<br/>/chat | /dashboard-data"]
         Cache["🗄️ Exact Cache<br/><i>(SQLite)</i>"]
         Tracing["📈 LangSmith<br/><i>(Observability)</i>"]
     end
 
-    subgraph LangGraph ["<b>🧠 AI Core  &mdash;  LangGraph Orchestrator</b>"]
+    subgraph LangGraph ["<b>🧠 AI Core - LangGraph Orchestrator</b>"]
         direction TB
 
         SafetyGuard{{"🛡️ Safety / Medical<br/>Guard Agent"}}
@@ -43,8 +43,8 @@ flowchart TB
 
         subgraph Specialists ["Specialist Agents"]
             direction LR
-            Coach["🏋️ Coach Agent<br/><i>Training &bull; PRs &bull; Recovery</i>"]
-            Nutrition["🥗 Nutrition Agent<br/><i>Diet &bull; Macros &bull; Supplements</i>"]
+            Coach["🏋️ Coach Agent<br/><i>Training | PRs | Recovery</i>"]
+            Nutrition["🥗 Nutrition Agent<br/><i>Diet | Macros | Supplements</i>"]
         end
 
         ToolNode["🛠️ Tool Executor<br/><i>(Human-in-the-loop)</i>"]
@@ -73,12 +73,12 @@ flowchart TB
 
     subgraph External ["<b>🌍 External Services</b>"]
         direction LR
-        OpenAI["🧠 OpenAI<br/>GPT-4o &bull; TTS"]
+        OpenAI["🧠 OpenAI<br/>GPT-4o | TTS"]
         Tavily["🔎 Tavily<br/>Live Research"]
     end
 
     %% ── Connections ────────────────────────────────────────────
-    User <-->|"HTTP / SSE"| Frontend
+    User <-->|"HTTP / SSE"| Chat
     Chat --> API
     Dashboard --> API
     

@@ -198,6 +198,31 @@ npm install
 npm run dev
 ```
 
+### Local Docker Setup
+Make sure these env files exist before starting Docker:
+
+- `backend/.env` for backend, MCP, Supabase, Neo4j, OpenAI, Tavily, LangSmith.
+- `frontend/.env` with `NEXT_PUBLIC_API_URL=http://localhost:8000`.
+
+Run the full local stack:
+
+```bash
+docker compose up --build
+```
+
+The backend Docker image installs `backend/requirements.runtime.txt`, which contains only runtime dependencies. Keep using `backend/requirements.txt` for local development, tests, and evaluation tooling.
+
+Then open:
+
+- Frontend: `http://localhost:3000`
+- Backend docs: `http://localhost:8000/docs`
+
+Stop the stack:
+
+```bash
+docker compose down
+```
+
 ---
 
 ## 🛠️ Tech Stack
@@ -243,5 +268,3 @@ PYTHONPATH=. python tests/run_evals.py
 ```
 
 Results are saved to `backend/tests/eval_results.csv`.
-
-

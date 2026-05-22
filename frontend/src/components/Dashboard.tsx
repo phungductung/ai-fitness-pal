@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Activity, Dumbbell, Utensils, Zap, Calendar, TrendingUp, Loader2, Play, Square, Volume2, Trash2, X } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import LoadingSkeleton from './LoadingSkeleton';
+import { apiUrl } from '@/utils/api';
 
 const weightData = [
   { date: 'Mon', weight: 85.5 },
@@ -39,7 +40,7 @@ export default function Dashboard() {
     else setIsLoading(true);
     
     try {
-      const response = await fetch('http://localhost:8000/dashboard-data');
+      const response = await fetch(apiUrl('/dashboard-data'));
       const json = await response.json();
       setData(json);
     } catch (error) {
@@ -79,11 +80,11 @@ export default function Dashboard() {
 
     setIsBriefingLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/morning-briefing');
+      const response = await fetch(apiUrl('/morning-briefing'));
       const data = await response.json();
       
       if (data.status === 'success') {
-        const audioUrl = `http://localhost:8000${data.audio_url}?t=${Date.now()}`;
+        const audioUrl = `${apiUrl(data.audio_url)}?t=${Date.now()}`;
         if (!audioRef.current) {
           audioRef.current = new Audio(audioUrl);
         } else {
@@ -110,7 +111,7 @@ export default function Dashboard() {
     setDeletingId(id);
     setConfirmId(null);
     try {
-      const response = await fetch(`http://localhost:8000/personal-records/${id}`, {
+      const response = await fetch(apiUrl(`/personal-records/${id}`), {
         method: 'DELETE',
       });
       const result = await response.json();

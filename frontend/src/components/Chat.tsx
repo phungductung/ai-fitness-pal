@@ -5,6 +5,7 @@ import { Send, Paperclip, Loader2, Plus, ShieldCheck, ShieldX, WifiOff, Zap } fr
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { createPortal } from 'react-dom';
+import { apiUrl } from '@/utils/api';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -70,7 +71,7 @@ export default function Chat() {
     formData.append('type', file.type.includes('pdf') ? 'pdf' : 'image');
 
     try {
-      const response = await fetch('http://localhost:8000/upload', {
+      const response = await fetch(apiUrl('/upload'), {
         method: 'POST',
         body: formData,
       });
@@ -107,7 +108,7 @@ export default function Chat() {
     setIsInitializing(true);
     // Request a fresh thread_id from the backend
     try {
-      const res = await fetch('http://localhost:8000/chat/new', { method: 'POST' });
+      const res = await fetch(apiUrl('/chat/new'), { method: 'POST' });
       const data = await res.json();
       setThreadId(data.thread_id);
     } catch {
@@ -148,7 +149,7 @@ export default function Chat() {
     setMessages(prev => [...prev, decisionMsg]);
 
     try {
-      const response = await fetch('http://localhost:8000/chat/resume', {
+      const response = await fetch(apiUrl('/chat/resume'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -279,7 +280,7 @@ export default function Chat() {
         payload.history = currentHistory;
       }
       
-      const response = await fetch('http://localhost:8000/chat', {
+      const response = await fetch(apiUrl('/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -550,10 +551,10 @@ export default function Chat() {
                   <div className="mb-2">
                     {msg.attachment?.type?.startsWith('image/') ? (
                       <img 
-                        src={`http://localhost:8000/${msg.attachment?.serverPath}`} 
+                        src={apiUrl(msg.attachment?.serverPath || '')} 
                         alt="attachment" 
                         className="max-w-full rounded-lg border border-white/10 cursor-zoom-in hover:opacity-90 transition-opacity"
-                        onClick={() => setPreviewImage(`http://localhost:8000/${msg.attachment?.serverPath}`)}
+                        onClick={() => setPreviewImage(apiUrl(msg.attachment?.serverPath || ''))}
                       />
                     ) : (
                       <div className="flex items-center gap-2 p-2 bg-white/10 rounded-lg border border-white/10 w-fit">

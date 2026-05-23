@@ -52,7 +52,7 @@ export default function Chat() {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [streamMetrics, setStreamMetrics] = useState<StreamMetrics | null>(null);
   const [mounted, setMounted] = useState(false);
-  
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -240,15 +240,15 @@ export default function Chat() {
   const handleSend = async () => {
     if (!input.trim()) return;
 
-    const userMessage: ChatMessage = { 
-      role: 'user' as const, 
+    const userMessage: ChatMessage = {
+      role: 'user' as const,
       content: input,
-      attachment: attachedFile ? { ...attachedFile } : null 
+      attachment: attachedFile ? { ...attachedFile } : null
     };
     const currentInput = input;
     const currentHistory = [...messages]; // Legacy: only used on first message if no threadId
     const currentFile = attachedFile;
-    
+
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
@@ -265,8 +265,8 @@ export default function Chat() {
 
     try {
       console.log("Sending message to backend...");
-      const payload: Record<string, any> = { 
-        message: currentInput, 
+      const payload: Record<string, any> = {
+        message: currentInput,
         file_path: currentFile?.serverPath || null,
       };
 
@@ -279,7 +279,7 @@ export default function Chat() {
       if (!threadId) {
         payload.history = currentHistory;
       }
-      
+
       const response = await fetch(apiUrl('/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -301,23 +301,23 @@ export default function Chat() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      
+
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        
+
         buffer += decoder.decode(value, { stream: true });
-        
+
         const parts = buffer.split(/\n\n|\r\n\r\n/);
-        buffer = parts.pop() || ''; 
-        
+        buffer = parts.pop() || '';
+
         for (const part of parts) {
           if (!part.trim()) continue;
-          
+
           const lines = part.split('\n');
           let event = 'message';
           let data = '';
-          
+
           for (const line of lines) {
             const cleanLine = line.trim();
             if (cleanLine.startsWith('event: ')) {
@@ -326,7 +326,7 @@ export default function Chat() {
               data = cleanLine.replace('data: ', '').trim();
             }
           }
-          
+
           if (data === 'end' || event === 'done') {
             console.log("Stream ended");
             setIsLoading(false);
@@ -384,13 +384,13 @@ export default function Chat() {
             }
             continue;
           }
-          
+
           if (data) {
             try {
               const parsedData = JSON.parse(data);
-              const sender = parsedData.sender === 'coach' ? 'coach' : 
-                             parsedData.sender === 'nutrition' ? 'nutrition' : 
-                             parsedData.sender || 'assistant';
+              const sender = parsedData.sender === 'coach' ? 'coach' :
+                parsedData.sender === 'nutrition' ? 'nutrition' :
+                  parsedData.sender || 'assistant';
 
               if (event === 'token' && parsedData.token) {
                 // Track first-token latency
@@ -458,20 +458,20 @@ export default function Chat() {
     if (!previewImage || !mounted) return null;
 
     return createPortal(
-      <div 
+      <div
         className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 md:p-12 animate-fade-in"
         onClick={() => setPreviewImage(null)}
       >
-        <button 
+        <button
           className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all hover:scale-110 z-[10000]"
           onClick={() => setPreviewImage(null)}
         >
           <Plus size={32} className="rotate-45" />
         </button>
         <div className="relative w-full h-full flex items-center justify-center animate-zoom-in" onClick={e => e.stopPropagation()}>
-          <img 
-            src={previewImage} 
-            alt="Preview" 
+          <img
+            src={previewImage}
+            alt="Preview"
             className="max-w-full max-h-full object-contain rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/10"
           />
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-black/50 backdrop-blur-sm rounded-full border border-white/10 text-white/70 text-xs font-medium">
@@ -487,7 +487,7 @@ export default function Chat() {
     <div className="flex flex-col h-full glass relative">
       <div className="p-4 border-b border-white/10 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <button 
+          <button
             onClick={handleNewChat}
             className="p-2 hover:bg-white/5 rounded-lg transition text-gray-400 hover:text-white"
             title="New Chat"
@@ -528,59 +528,66 @@ export default function Chat() {
           const isLastAssistant = msg.role === 'assistant' && i === messages.length - 1;
           const showCursor = isLastAssistant && isStreaming;
           return (
-          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} message-enter`}>
-            <div className={`max-w-[80%] p-3 rounded-2xl ${
-              msg.role === 'user' 
-                ? 'bg-primary text-black rounded-tr-none' 
-                : 'bg-white/5 border border-white/10 rounded-tl-none'
-            }`}>
-              {msg.role === 'assistant' && (
-                <div className="text-[10px] uppercase font-bold text-gray-400 mb-1 flex items-center gap-1">
-                  {msg.sender === 'coach' ? <Dumbbell size={10} /> : <Utensils size={10} />}
-                  {msg.sender}
-                  {/* Show cache badge on the last assistant message if it was a cache hit */}
-                  {isLastAssistant && !isStreaming && streamMetrics?.cached && (
-                    <span className="cache-badge cache-badge--hit ml-1">
-                      <Zap size={8} /> cached
-                    </span>
-                  )}
-                </div>
-              )}
-              <div className={`text-sm markdown-content ${showCursor ? 'streaming-cursor' : ''}`}>
-                {msg.attachment && (
-                  <div className="mb-2">
-                    {msg.attachment?.type?.startsWith('image/') ? (
-                      <img 
-                        src={apiUrl(msg.attachment?.serverPath || '')} 
-                        alt="attachment" 
-                        className="max-w-full rounded-lg border border-white/10 cursor-zoom-in hover:opacity-90 transition-opacity"
-                        onClick={() => setPreviewImage(apiUrl(msg.attachment?.serverPath || ''))}
-                      />
-                    ) : (
-                      <div className="flex items-center gap-2 p-2 bg-white/10 rounded-lg border border-white/10 w-fit">
-                        <Paperclip size={14} className="text-primary" />
-                        <span className="text-xs truncate max-w-[150px]">{msg.attachment.name}</span>
-                      </div>
+            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} message-enter`}>
+              <div className={`max-w-[80%] p-3 rounded-2xl ${msg.role === 'user'
+                  ? 'bg-primary text-black rounded-tr-none'
+                  : 'bg-white/5 border border-white/10 rounded-tl-none'
+                }`}>
+                {msg.role === 'assistant' && (
+                  <div className="text-[10px] uppercase font-bold text-gray-400 mb-1 flex items-center gap-1">
+                    {msg.sender === 'coach' ? <Dumbbell size={10} /> : <Utensils size={10} />}
+                    {msg.sender}
+                    {/* Show cache badge on the last assistant message if it was a cache hit */}
+                    {isLastAssistant && !isStreaming && streamMetrics?.cached && (
+                      <span className="cache-badge cache-badge--hit ml-1">
+                        <Zap size={8} /> cached
+                      </span>
                     )}
                   </div>
                 )}
-                <ReactMarkdown 
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    img: ({ node, ...props }) => (
-                      <img 
-                        {...props} 
-                        className="max-w-full rounded-lg border border-white/10 my-2 cursor-zoom-in hover:opacity-90 transition-opacity" 
-                        onClick={() => setPreviewImage(typeof props.src === 'string' ? props.src : null)}
-                      />
-                    )
-                  }}
-                >
-                  {msg.content}
-                </ReactMarkdown>
+                <div className={`text-sm markdown-content ${showCursor ? 'streaming-cursor' : ''}`}>
+                  {msg.attachment && (
+                    <div className="mb-2">
+                      {msg.attachment?.type?.startsWith('image/') ? (
+                        <img
+                          src={apiUrl(msg.attachment?.serverPath || '')}
+                          alt="attachment"
+                          className="max-w-full rounded-lg border border-white/10 cursor-zoom-in hover:opacity-90 transition-opacity"
+                          onClick={() => setPreviewImage(apiUrl(msg.attachment?.serverPath || ''))}
+                        />
+                      ) : (
+                        <div className="flex items-center gap-2 p-2 bg-white/10 rounded-lg border border-white/10 w-fit">
+                          <Paperclip size={14} className="text-primary" />
+                          <span className="text-xs truncate max-w-[150px]">{msg.attachment.name}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      img: ({ node, ...props }) => (
+                        <img
+                          {...props}
+                          className="max-w-full rounded-lg border border-white/10 my-2 cursor-zoom-in hover:opacity-90 transition-opacity"
+                          onClick={() => setPreviewImage(typeof props.src === 'string' ? props.src : null)}
+                        />
+                      ),
+                      a: ({ node, ...props }) => (
+                        <a
+                          {...props}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary underline"
+                        />
+                      )
+                    }}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                </div>
               </div>
             </div>
-          </div>
           );
         })}
 
@@ -593,7 +600,19 @@ export default function Chat() {
                 Confirmation Required
               </div>
               <div className="text-sm markdown-content mb-4">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    a: ({ node, ...props }) => (
+                      <a
+                        {...props}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary underline"
+                      />
+                    )
+                  }}
+                >
                   {pendingInterrupt.question}
                 </ReactMarkdown>
               </div>
@@ -633,7 +652,7 @@ export default function Chat() {
           <div className="mb-2 flex items-center gap-2 p-2 bg-white/5 rounded-lg border border-white/10 w-fit">
             <Paperclip size={14} className="text-primary" />
             <span className="text-xs text-gray-300 truncate max-w-[200px]">{attachedFile.name}</span>
-            <button 
+            <button
               onClick={() => setAttachedFile(null)}
               className="ml-1 text-gray-500 hover:text-white"
             >
@@ -658,19 +677,18 @@ export default function Chat() {
             disabled={isUploading || !!pendingInterrupt}
             className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-12 focus:ring-1 focus:ring-primary focus:border-transparent outline-none transition-all disabled:opacity-50"
           />
-          <button 
+          <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploading}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition disabled:opacity-50"
           >
             {isUploading ? <Loader2 size={20} className="animate-spin" /> : <Paperclip size={20} />}
           </button>
-          <button 
+          <button
             onClick={handleSend}
             disabled={isLoading || isUploading || !!pendingInterrupt || (!input.trim() && !attachedFile)}
-            className={`absolute right-3 top-1/2 -translate-y-1/2 transition-all duration-200 ${
-              isLoading || isUploading || !!pendingInterrupt || (!input.trim() && !attachedFile) ? 'text-gray-600 cursor-not-allowed scale-95' : 'text-primary hover:text-white scale-100 hover:scale-110'
-            }`}
+            className={`absolute right-3 top-1/2 -translate-y-1/2 transition-all duration-200 ${isLoading || isUploading || !!pendingInterrupt || (!input.trim() && !attachedFile) ? 'text-gray-600 cursor-not-allowed scale-95' : 'text-primary hover:text-white scale-100 hover:scale-110'
+              }`}
           >
             <Send size={20} />
           </button>
@@ -693,9 +711,9 @@ export default function Chat() {
 }
 
 function Dumbbell({ size, className }: { size: number; className?: string }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m6.5 6.5 11 11"/><path d="m10 10 5.5 5.5"/><path d="m3 21 8-8"/><path d="m9 22 10-10"/><path d="m2 19 10-10"/><path d="m14 11 8 8"/><path d="m15 10 7-7"/><path d="m19 2 3 3"/></svg>;
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m6.5 6.5 11 11" /><path d="m10 10 5.5 5.5" /><path d="m3 21 8-8" /><path d="m9 22 10-10" /><path d="m2 19 10-10" /><path d="m14 11 8 8" /><path d="m15 10 7-7" /><path d="m19 2 3 3" /></svg>;
 }
 
 function Utensils({ size, className }: { size: number; className?: string }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>;
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2" /><path d="M7 2v20" /><path d="M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7" /></svg>;
 }

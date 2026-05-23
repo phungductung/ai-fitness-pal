@@ -652,6 +652,7 @@ Priority: If both are needed, put the most relevant one first."""
         6. **Markdown Formatting**: Use lists and bold text for structure.
         7. **Traceability**: Every claim or number in your response MUST come from the specialist advice above.
         8. **Preserve Visuals**: If the specialist advice contains a Markdown image link (e.g., `![Progress](...)`), you MUST include it in your final response.
+        9. **Preserve Links & Citations**: If any specialist output contains URLs (for example in a `results` array with `url` fields), include those URLs verbatim in the final reply. Append a **Sources** section at the end with each source as a Markdown link (`[Title](URL)`). Do NOT replace URLs with parenthetical placeholders like "(study)" or remove them.
         """
 
         try:
